@@ -1,0 +1,16 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./...
+      - run: CGO_ENABLED=0 go build -trimpath -o infralens .
+      - run: ./infralens demo --out demo && test -s demo/audit.html

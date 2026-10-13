@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InfraLens</title>
+<style>__STYLE__</style>
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <div class="brand"><span class="bn">InfraLens</span> <span id="meta"></span></div>
+    <div id="kpis"></div>
+  </header>
+  <div id="bar">
+    <div class="seg" id="views">
+      <button data-view="map" class="on">Map</button>
+      <button data-view="costs">Costs</button>
+    </div>
+    <input id="search" type="search" placeholder="Search name, id, type, tag…" autocomplete="off">
+    <div class="seg" id="status">
+      <button data-f="all" class="on">all</button>
+      <button data-f="orphan_waste" class="waste">waste</button>
+      <button data-f="shadow_it" class="shadow">no IaC</button>
+      <button data-f="managed" class="managed">managed</button>
+      <button data-f="drift" title="Resources whose live attributes differ from Terraform state">drift</button>
+      <button data-f="costly" title="The 25 most expensive resources on the current price basis">costly</button>
+      <button data-f="noowner" title="Resources with no owner, team or project tag">no owner</button>
+    </div>
+    <select id="region" title="Region"></select>
+    <div class="seg" id="basis" title="Where the dollar figures come from">
+      <button data-b="list" class="on">list price</button>
+      <button data-b="billed" title="List-price estimates scaled so that each service sums to last full month's Cost Explorer usage">by bill</button>
+    </div>
+    <div class="spacer"></div>
+    <button id="expandAll">Expand all</button>
+    <button id="collapseAll">Collapse all</button>
+    <button id="fit">Fit</button>
+    <button id="dlaudit" title="Save the audit document for this scan (client name: edit it in the file or generate it with infralens audit / the web app)">Download audit</button>
+  </div>
+  <main id="stage">
+    <div id="cy"></div>
+    <div class="sb" id="sbx" aria-hidden="true"><i></i></div>
+    <div class="sb" id="sby" aria-hidden="true"><i></i></div>
+    <svg id="tm" style="display:none"></svg>
+    <div id="legend"></div>
+    <div id="empty" style="display:none"></div>
+  </main>
+  <aside id="side">
+    <nav id="tabs">
+      <button data-tab="findings" class="on">Findings</button>
+      <button data-tab="selection">Selection</button>
+      <button data-tab="money">Money</button>
+      <button data-tab="commitments">Commitments</button>
+      <button data-tab="summary">Summary</button>
+      <button data-tab="notes">Notes</button>
+    </nav>
+    <section id="tab-findings"></section>
+    <section id="tab-selection" hidden></section>
+    <section id="tab-money" hidden></section>
+    <section id="tab-commitments" hidden></section>
+    <section id="tab-summary" hidden></section>
+    <section id="tab-notes" hidden></section>
+  </aside>
+</div>
+<div id="tip" hidden></div>
+<script>__CYTOSCAPE__</script>
+<script>
+const scanData = __INFRALENS_DATA__;
+</script>
+<script>__APP__</script>
+<script type="application/json" id="auditdoc">__AUDIT__</script>
+</body>
+</html>

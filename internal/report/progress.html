@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Progress since the last audit — {{.Client}}</title>
+<style>
+  :root{--ink:#16202e;--muted:#5d6b7e;--line:#d9dfe8;--soft:#f4f6fa;--accent:#0b5cad;--ok:#067647;--warn:#b54708}
+  *{box-sizing:border-box}
+  body{margin:0;background:#e9edf3;color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .page{max-width:900px;margin:24px auto;background:#fff;padding:48px 56px;box-shadow:0 1px 4px rgba(0,0,0,.12)}
+  h1{font-size:26px;margin:0 0 4px} h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  .meta{color:var(--muted);font-size:13px}
+  header{border-bottom:3px solid var(--accent);padding-bottom:18px;margin-bottom:24px}
+  .figures{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}
+  .fig{background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+  .fig b{display:block;font-size:20px} .fig span{color:var(--muted);font-size:12px}
+  .fig.ok b{color:var(--ok)} .fig.warn b{color:var(--warn)}
+  .caveat{background:#fff8e6;border:1px solid #f3d98b;border-radius:6px;padding:10px 14px;margin:16px 0;font-size:13px}
+  table{width:100%;border-collapse:collapse;margin:8px 0;font-size:13px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px} td.n,th.n{text-align:right;white-space:nowrap}
+  .small{font-size:12.5px;color:var(--muted)}
+  footer{margin-top:36px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+  @media print{body{background:#fff}.page{box-shadow:none;margin:0;max-width:none;padding:0}@page{size:A4;margin:16mm}}
+</style>
+</head>
+<body><div class="page">
+<header>
+  <h1>Progress since the last audit</h1>
+  <div class="meta">{{.Client}} · {{.OldDate}} → {{.NewDate}} ({{.Days}} days){{if .Consultant}} · prepared by {{.Consultant}}{{end}}{{if .Anonymized}} · identifiers anonymised{{end}}</div>
+</header>
+
+<div class="figures">
+  <div class="fig ok"><b>{{.ResolvedCost}}</b><span>{{.ResolvedN}} candidate(s) no longer exist (est. $/month, list price)</span></div>
+  <div class="fig warn"><b>{{.OpenCost}}</b><span>{{.OpenN}} candidate(s) still open</span></div>
+  <div class="fig"><b>{{.NewCost}}</b><span>{{.NewN}} new candidate(s)</span></div>
+</div>
+
+<div class="caveat">
+  <b>What this is.</b> The first figure is the list-price estimate of resources that were waste candidates in the earlier scan and are gone in the later one.
+  It is not a measured saving: confirm it on the invoice for the first full month after the change.
+  {{if .BilledOld}}Billed usage in the last full month at each scan: {{.BilledOld}} then, {{.BilledNew}} now (other changes in the account also move this figure).{{end}}
+</div>
+{{range .Notes}}<p class="small">Note: {{.}}</p>{{end}}
+
+<h2>Resolved</h2>
+{{if .Resolved}}<table><tr><th>Resource</th><th>Type</th><th>Region</th><th class="n">Was $/month</th></tr>
+{{range .Resolved}}<tr><td>{{.Name}}</td><td>{{.Type}}</td><td>{{.Region}}</td><td class="n">{{.Was}}</td></tr>{{end}}</table>
+{{else}}<p class="small">None of the earlier candidates has been removed.</p>{{end}}
+
+{{if .NowActive}}<h2>No longer candidates</h2>
+<p class="small">Still present but no longer flagged. Not counted as savings.</p>
+<table><tr><th>Resource</th><th>Type</th><th>Region</th><th>Note</th></tr>
+{{range .NowActive}}<tr><td>{{.Name}}</td><td>{{.Type}}</td><td>{{.Region}}</td><td>{{.Note}}</td></tr>{{end}}</table>{{end}}
+
+<h2>Still open</h2>
+{{if .Open}}<table><tr><th>Resource</th><th>Type</th><th>Region</th><th class="n">$/month</th><th>Basis</th></tr>
+{{range .Open}}<tr><td>{{.Name}}</td><td>{{.Type}}</td><td>{{.Region}}</td><td class="n">{{.Now}}</td><td>{{.Note}}</td></tr>{{end}}</table>
+{{else}}<p class="small">No earlier candidate remains.</p>{{end}}
+
+<h2>New since the last audit</h2>
+{{if .New}}<table><tr><th>Resource</th><th>Type</th><th>Region</th><th class="n">$/month</th></tr>
+{{range .New}}<tr><td>{{.Name}}</td><td>{{.Type}}</td><td>{{.Region}}</td><td class="n">{{.Now}}</td></tr>{{end}}</table>
+{{else}}<p class="small">No new candidates.</p>{{end}}
+
+<footer>Generated {{.Generated}} by InfraLens {{.Version}}. Estimates only.</footer>
+</div></body></html>

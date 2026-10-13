@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>InfraLens</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <h1>InfraLens</h1>
+  <span id="ver" class="muted"></span>
+  <nav id="nav">
+    <button data-tab="scan" class="on">Scan</button>
+    <button data-tab="map">Map</button>
+    <button data-tab="reports">Reports</button>
+    <button data-tab="ai">AI analysis</button>
+    <button data-tab="notes">Owner notes</button>
+    <button data-tab="settings">Settings</button>
+  </nav>
+</header>
+<main>
+  <section id="tab-scan">
+    <h2>Scan an account</h2>
+    <p class="muted">Read-only. Every AWS call is checked in code and only Describe/List/Get operations can run.</p>
+    <div class="form">
+      <label>Profile <input id="profile" list="profiles" placeholder="AWS profile from ~/.aws/config"></label>
+      <datalist id="profiles"></datalist>
+      <details><summary>More options</summary>
+        <label>Regions <input id="regions" placeholder="empty = all enabled regions"></label>
+        <label>Checks <input id="services" placeholder="empty = all (see: infralens checks)"></label>
+        <label>Terraform state <input id="tfstate" placeholder="file, directory or s3://bucket/prefix"></label>
+        <label>Prowler JSON <input id="prowler" placeholder="path to a Prowler output file"></label>
+        <label class="inline"><input type="checkbox" id="sso"> run <code>aws sso login</code> first (opens the browser)</label>
+      </details>
+      <div class="row">
+        <button id="go" class="primary">Start scan</button>
+        <button id="stop" hidden>Cancel</button>
+        <span id="jobstate" class="muted"></span>
+      </div>
+    </div>
+    <pre id="log" hidden></pre>
+    <div id="jobdone" hidden></div>
+  </section>
+
+  <section id="tab-map" hidden>
+    <div class="maphead">
+      <select id="map-scan" aria-label="Scan"></select>
+      <a id="map-new" target="_blank" rel="noopener" class="muted">open in a new tab</a>
+      <span class="muted" id="map-empty" hidden>No scan yet — run one on the Scan tab.</span>
+    </div>
+    <iframe id="mapframe" title="Map" referrerpolicy="no-referrer"></iframe>
+  </section>
+
+  <section id="tab-reports" hidden>
+    <h2>Reports</h2>
+    <p id="noscans" class="muted" hidden>No scans yet. Run one on the Scan tab.</p>
+    <table id="scans"><thead><tr><th>Taken</th><th>Account</th><th>Profile</th><th class="n">Resources</th><th class="n">Findings</th><th class="n">Waste / mo</th><th></th></tr></thead><tbody></tbody></table>
+
+    <div id="auditbox" hidden class="card">
+      <h3>Generate report</h3>
+      <div class="muted" id="auditfor"></div>
+      <div class="form">
+        <label>Client <input id="a-client" required></label>
+        <label>Prepared by <input id="a-consultant"></label>
+        <label>Logo (PNG, JPEG or SVG, up to 256 KiB) <input id="a-logo" type="file" accept="image/png,image/jpeg,image/svg+xml"></label>
+        <label class="inline"><input type="checkbox" id="a-anon"> anonymise names, IDs and the account number (the raw report is then not written)</label>
+        <label class="inline"><input type="checkbox" id="a-ai"> add an AI reading (uses the model from Settings)</label>
+        <div id="aipreview" hidden class="card inner">
+          <div id="aiwhere"></div>
+          <details><summary>Show exactly what would be sent</summary><pre id="aipayload"></pre></details>
+          <label class="inline"><input type="checkbox" id="a-consent"> I have seen it and agree to send it</label>
+        </div>
+        <div class="row"><button id="a-go" class="primary">Generate report</button><span id="a-state" class="muted"></span></div>
+      </div>
+      <div id="a-out"></div>
+    </div>
+  </section>
+
+  <section id="tab-ai" hidden>
+    <h2>AI analysis</h2>
+    <p class="muted">A separate document: the model reads a scan and explains it, or answers your question. It sees findings and totals with names removed, and it cannot know your plans. Configure the model in Settings.</p>
+    <div class="form">
+      <label>Scan <select id="ai-scan"></select></label>
+      <label>Question (optional — empty = a general reading)
+        <textarea id="ai-q" rows="3" maxlength="1000" placeholder="e.g. What should I look at first if I want to cut cost without risk?"></textarea></label>
+      <div id="ai-where" class="muted"></div>
+      <details id="ai-det" hidden><summary>Show exactly what would be sent</summary><pre id="ai-payload"></pre></details>
+      <label class="inline" id="ai-consent-row" hidden><input type="checkbox" id="ai-consent"> I have seen it and agree to send it</label>
+      <div class="row"><button id="ai-go" class="primary">Generate AI analysis</button><span id="ai-state" class="muted"></span></div>
+    </div>
+    <div id="ai-out" class="card" hidden></div>
+  </section>
+
+  <section id="tab-notes" hidden>
+    <h2>Owner notes</h2>
+    <p class="muted">What you know and a scan cannot: planned migrations, resources that are idle on purpose. A matching finding is shown with the note and is not counted. A note stops applying after its date.</p>
+    <table id="notetable"><thead><tr><th>Matches</th><th>Note</th><th>Until</th><th></th></tr></thead><tbody></tbody></table>
+    <div class="card"><h3>Add a note</h3>
+      <div class="form">
+        <div class="row">
+          <select id="n-field"><option>name</option><option>id</option><option>type</option><option>service</option><option>region</option><option>rule</option><option>finding</option></select>
+          <input id="n-value" placeholder="value, e.g. acme-feed-* or aws_kinesis_stream">
+        </div>
+        <label>Note <input id="n-text" placeholder="why it is the way it is"></label>
+        <label>Until (optional) <input id="n-until" type="date"></label>
+        <div class="row"><button id="n-add">Add</button><button id="n-save" class="primary">Save notes</button><span id="n-state" class="muted"></span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-settings" hidden>
+    <h2>Language model</h2>
+    <p class="muted">Optional. The model writes prose around numbers the tool has already computed; statements with unknown IDs or amounts are removed. A local model (Ollama) never leaves this machine.</p>
+    <div class="form">
+      <label>Provider
+        <select id="s-provider">
+          <option value="">(none)</option><option>gemini</option><option>openai</option><option>anthropic</option>
+          <option>ollama</option><option>openai-compatible</option><option>bedrock</option>
+        </select></label>
+      <label>Model <input id="s-model" list="s-models" placeholder="empty = chosen automatically from what the provider offers now"></label>
+      <datalist id="s-models"></datalist>
+      <label>Endpoint <input id="s-base" placeholder="ollama / OpenAI-compatible only, e.g. http://127.0.0.1:11434"></label>
+      <label>Key from environment variable <input id="s-keyenv" placeholder="e.g. OPENAI_API_KEY (the variable name, not the key)"></label>
+      <label>…or paste a key <input id="s-key" type="password" autocomplete="off" placeholder="stored in ~/.infralens/secrets.json (mode 0600)"></label>
+      <label>AWS profile (bedrock) <input id="s-profile"></label>
+      <label>AWS region (bedrock) <input id="s-region"></label>
+      <label>Language of the text <input id="s-lang" placeholder="English"></label>
+      <div class="row"><button id="s-save" class="primary">Save</button><button id="s-models-btn">Save &amp; load models</button><button id="s-test">Test the connection</button><span id="s-state" class="muted"></span></div>
+      <div id="s-keystate" class="muted"></div>
+    </div>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

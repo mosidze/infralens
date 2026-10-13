@@ -1,0 +1,14 @@
+/infralens
+/dist/
+/demo/
+report.html
+*.json
+!go.sum
+/audit/
+/cleanup/
+/audit-*/
+*.tfstate
+*.tfstate.*
+secrets.json
+serve.token
+

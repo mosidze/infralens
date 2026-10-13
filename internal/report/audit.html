@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloud infrastructure audit — {{.Client}}</title>
+<style>
+  :root{--ink:#16202e;--muted:#5d6b7e;--line:#d9dfe8;--soft:#f4f6fa;--accent:#0b5cad;--high:#b42318;--med:#b54708;--low:#475467;--ok:#067647}
+  *{box-sizing:border-box}
+  body{margin:0;background:#e9edf3;color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .page{max-width:900px;margin:24px auto;background:#fff;padding:48px 56px;box-shadow:0 1px 4px rgba(0,0,0,.12)}
+  header.doc{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;border-bottom:3px solid var(--accent);padding-bottom:18px;margin-bottom:26px}
+  header.doc img{max-height:56px;max-width:200px}
+  h1{font-size:26px;margin:0 0 4px}
+  h2{font-size:18px;margin:34px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  h3{font-size:14px;margin:20px 0 6px}
+  .meta{color:var(--muted);font-size:13px}
+  .lead p{font-size:15px;margin:8px 0}
+  .figures{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}
+  .fig{background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+  .fig b{display:block;font-size:20px}
+  .fig span{color:var(--muted);font-size:12px}
+  .caveat{background:#fff8e6;border:1px solid #f3d98b;border-radius:6px;padding:10px 14px;margin:16px 0;font-size:13px}
+  table{width:100%;border-collapse:collapse;margin:8px 0;font-size:13px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px}
+  td.n,th.n{text-align:right;white-space:nowrap}
+  .finding{border:1px solid var(--line);border-left:4px solid var(--low);border-radius:6px;padding:10px 14px;margin:10px 0;break-inside:avoid}
+  .finding.high{border-left-color:var(--high)} .finding.medium{border-left-color:var(--med)}
+  .finding.acked{border-left-color:var(--ok);background:var(--soft)}
+  .finding .top{display:flex;justify-content:space-between;gap:12px}
+  .finding .name{font-weight:700;word-break:break-word}
+  .finding .cost{font-weight:700;white-space:nowrap}
+  .tag{display:inline-block;font-size:11px;font-weight:600;border-radius:999px;padding:1px 8px;background:var(--soft);border:1px solid var(--line);color:var(--muted);margin-right:4px}
+  .tag.high{color:var(--high);border-color:var(--high)} .tag.medium{color:var(--med);border-color:var(--med)}
+  ul{margin:4px 0 4px 18px;padding:0} li{margin:2px 0}
+  .small{font-size:12.5px;color:var(--muted)}
+  .ask{font-style:italic;color:#344054}
+  .decision{border:1px solid var(--line);border-radius:6px;padding:10px 14px;margin:10px 0;break-inside:avoid}
+  .pf{border:1px solid var(--line);border-left:4px solid var(--low);border-radius:6px;padding:9px 13px;margin:8px 0;break-inside:avoid}
+  .pf.critical{border-left-color:#7f1d1d}.pf.high{border-left-color:var(--high)}.pf.medium{border-left-color:var(--med)}
+  .sev{display:inline-block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;border-radius:3px;padding:1px 6px;margin-right:6px;background:var(--soft);color:var(--muted)}
+  .sev.critical{background:#7f1d1d;color:#fff}.sev.high{background:var(--high);color:#fff}.sev.medium{background:#fde7c8;color:var(--med)}
+  .score{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}
+  .score .fig b{font-size:17px}
+  .bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:4px 0}.bar i{display:block;height:100%;background:var(--accent)}
+  ol.prio{margin:6px 0 6px 20px;padding:0}ol.prio li{margin:5px 0}
+  .res{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--muted);word-break:break-all}
+  footer{margin-top:36px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+  @media print{
+    body{background:#fff}
+    .page{box-shadow:none;margin:0;max-width:none;padding:0}
+    h2{break-after:avoid}
+    @page{size:A4;margin:16mm}
+  }
+  @media (max-width:700px){.page{padding:24px 18px}.figures,.score{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="doc">
+  <div>
+    <h1>Cloud infrastructure audit</h1>
+    <div class="meta">{{.Client}} · {{.Scope}}</div>
+    <div class="meta">{{.Generated}}{{if .Consultant}} · prepared by {{.Consultant}}{{end}}{{if .Anonymized}} · identifiers anonymised{{end}}</div>
+  </div>
+  {{if .Logo}}<img src="{{.Logo}}" alt="">{{end}}
+</header>
+
+<section class="lead">
+  <h2 style="margin-top:0">Summary</h2>
+  {{range .Headline}}<p>{{.}}</p>{{end}}
+
+  <div class="figures">
+    <div class="fig"><b>{{.Resources}}</b><span>resources inspected</span></div>
+    <div class="fig"><b>{{.EstCost}}</b><span>{{if .HasLedger}}cost / month (bill where tied, else estimate){{else}}est. cost / month (list price){{end}}</span></div>
+    <div class="fig"><b>{{.WasteCost}}</b><span>{{.WasteCount}} waste candidate(s) / month</span></div>
+    <div class="fig"><b>{{.ShadowCount}}</b><span>without an IaC marker</span></div>
+  </div>
+
+  <div class="caveat">
+    <b>How to read the numbers.</b> {{if .HasLedger}}Where last month's bill could be tied to a resource by measured usage, the figure is real money; elsewhere it is an estimate from list prices and observed traffic, and the tables say which is which.{{else}}Costs are estimates from list prices, instance sizes and observed traffic. Savings Plans and reservations held in other accounts are not visible, so figures can differ from the invoice.{{end}} A candidate is evidence of non-use inside a time window, not proof; the resource's owner decides. Nothing was changed in the account.
+  </div>
+</section>
+
+{{if .AI}}
+<h2>AI-assisted reading</h2>
+<div class="caveat"><b>Written by a language model ({{.AI.Model}}), not by an auditor.</b> It was given only the findings and totals of this report, with names removed. Amounts and finding references were checked against the scan{{if .AI.Removed}}; {{.AI.Removed}} statement(s) that did not check out were removed{{end}}. Treat it as a reading aid: the findings below are the record.</div>
+{{if .AI.Headline}}<p><b>{{.AI.Headline}}</b></p>{{end}}
+{{range .AI.Paragraphs}}<p>{{.}}</p>{{end}}
+{{if .AI.Actions}}<h3>Suggested order of attention</h3>
+<ol class="prio">{{range .AI.Actions}}<li><span class="sev {{.Severity}}">{{.Severity}}</span><b>{{.Title}}</b> <span class="small">{{.Why}}</span></li>{{end}}</ol>{{end}}
+{{end}}
+
+<h2>Where the findings are</h2>
+<div class="score">
+  {{range .Pillars}}<div class="fig"><b>{{.Open}}</b><span>{{.Name}}{{if .Critical}} · {{.Critical}} critical{{end}}{{if .High}} · {{.High}} high{{end}}{{if .Acked}} · {{.Acked}} acknowledged{{end}}</span></div>{{end}}
+</div>
+
+{{if .Priorities}}
+<h2>What to do first</h2>
+<p class="small">Ordered by severity, then by the money at stake, then by how cheap it is to do. This is a reading order, not a project plan: the owner of each item decides.</p>
+<ol class="prio">
+{{range .Priorities}}<li><span class="sev {{.Severity}}">{{.Severity}}</span><b>{{.Title}}</b>
+  <span class="small"> · {{.Source}}{{if .Cost}} · {{.Cost}}/mo{{end}}{{if .Effort}} · effort {{.Effort}}{{end}}</span></li>{{end}}
+</ol>
+{{end}}
+
+<h2>Waste candidates</h2>
+{{if not .WasteCount}}<p class="small">No resource met the criteria for a waste candidate.</p>{{end}}
+
+{{if .High}}<h3>High confidence · {{len .High}}</h3>
+{{range .High}}{{template "finding" .}}{{end}}{{end}}
+{{if .Medium}}<h3>Medium confidence · {{len .Medium}}</h3>
+{{range .Medium}}{{template "finding" .}}{{end}}{{end}}
+{{if .Low}}<h3>Low confidence · {{len .Low}}</h3>
+<p class="small">Weak signals: usually a short observation window, a possible placeholder, or a cost that is an upper bound. Verify before treating as savings.</p>
+<table>
+  <tr><th>Resource</th><th>Type</th><th>Region</th><th class="n">Est. $/month</th><th>Basis</th></tr>
+  {{range .Low}}<tr><td>{{.Name}}</td><td>{{.Type}}</td><td>{{.Region}}</td><td class="n">{{.Cost}}</td>
+      <td>{{.Reason}}{{range .Evidence}}<br><span class="small">{{.}}</span>{{end}}</td></tr>{{end}}
+</table>{{end}}
+
+{{if .Acked}}<h3>Acknowledged by the owner · {{len .Acked}}</h3>
+<p class="small">Seen and recorded as expected. Not counted above.</p>
+{{range .Acked}}{{template "finding" .}}{{end}}{{end}}
+
+{{if .VerifyByType}}
+<h3>Before acting: what each check cannot see</h3>
+{{range .VerifyByType}}
+<div class="small"><b>{{.Type}}</b><ul>{{range .Items}}<li>{{.}}</li>{{end}}</ul></div>
+{{end}}{{end}}
+
+<h2>Decisions that depend on your plans</h2>
+{{if not .Decisions}}<p class="small">No commitment needs a decision at the moment.</p>{{end}}
+{{if .Decisions}}<p class="small">These are facts with conditional suggestions. The scan does not know about planned migrations, resizes or shutdowns, so none of them is a recommendation to buy or to cancel.</p>{{end}}
+{{range .Decisions}}
+<div class="decision">
+  <b>{{.Service}}</b>{{if .Detail}} · {{.Detail}}{{end}}{{if .Ends}} · ends {{.Ends}}{{end}}
+  <ul>{{range .Facts}}<li>{{.}}</li>{{end}}</ul>
+  {{range .Suggestions}}<div class="ask">If your plans allow: {{.}}</div>{{end}}
+</div>
+{{end}}
+
+{{if .OtherCommitments}}<h3>Other commitments</h3>
+<table>
+  <tr><th>Service</th><th>Commitment</th><th>State</th><th>Ends</th><th>Note</th></tr>
+  {{range .OtherCommitments}}
+  <tr><td>{{.Service}}</td><td>{{.Detail}}</td><td>{{.State}}</td><td>{{.Ends}}</td>
+      <td>{{range .Facts}}{{.}}<br>{{end}}{{if .Note}}<i>Acknowledged: {{.Note}}</i>{{end}}</td></tr>
+  {{end}}
+</table>{{end}}
+
+{{if .Ledger}}
+<h2>The bill, and what it is tied to</h2>
+<p>Of <b>{{.Ledger.Billed}}</b> billed in {{.Ledger.Month}}, <b>{{.Ledger.Tied}}</b> ({{.Ledger.Pct}}) could be tied to specific resources by measured usage (hours, GB, requests). This is real money, not a catalogue estimate; it is the part of the bill that can be explained resource by resource.</p>
+<table>
+  <tr><th>Service</th><th class="n">Billed</th><th class="n">Tied to resources</th><th class="n">Not tied</th></tr>
+  {{range .Ledger.Services}}<tr><td>{{.Name}}</td><td class="n">{{.Billed}}</td><td class="n">{{.Tied}}</td><td class="n">{{.Rest}}</td></tr>{{end}}
+</table>
+{{if .Ledger.Lines}}<h3>Largest usage that could not be tied to a resource</h3>
+<table>
+  <tr><th>Service</th><th>Usage type</th><th class="n">Cost</th></tr>
+  {{range .Ledger.Lines}}<tr><td>{{.Service}}</td><td>{{.Usage}}</td><td class="n">{{.Cost}}</td></tr>{{end}}
+</table>
+<p class="small">These are usage- or request-priced items (data transfer, requests, account-level features). Only the payer account can enable per-resource cost data.</p>{{end}}
+{{else if .BilledTotal}}
+<h2>Cost picture</h2>
+<p>Billed usage last full month: <b>{{.BilledTotal}}</b>. Checks exist for <b>{{.ScannedPct}}</b> of it; their estimates account for <b>{{.ExplainedPct}}</b>.</p>
+<table>
+  <tr><th>Service</th><th class="n">Billed last month</th><th>Checked</th></tr>
+  {{range .Services}}<tr><td>{{.Name}}</td><td class="n">{{.Billed}}</td><td>{{if .Scanned}}yes{{else}}no{{end}}</td></tr>{{end}}
+</table>
+{{end}}
+
+{{range .Pillars}}
+<h2>{{.Name}}</h2>
+<p class="small">{{.Intro}}</p>
+{{if eq .Key "iac"}}{{with $.IaC}}{{range .Lines}}<p>{{.}}</p>{{end}}{{range .Notes}}<p class="small">Note: {{.}}</p>{{end}}{{end}}{{if $.Ownerless}}<p>{{$.Ownerless}}.</p>{{end}}{{end}}
+{{if not .Findings}}<p class="small">Nothing was reported in this layer by the sources that ran.</p>{{end}}
+{{range .Findings}}{{template "pfinding" .}}{{end}}
+{{end}}
+
+<h2>What was not checked</h2>
+<ul>
+  {{range .NotChecked}}<li>{{.}}</li>{{end}}
+  <li>Savings Plans and reservations bought in other accounts, and the invoice itself (tax, support).</li>
+  <li>Application-level usage: the checks use infrastructure metrics, not whether a business process still needs a resource.</li>
+  <li>Security posture, IAM and network exposure are outside this audit.</li>
+  {{range .Warnings}}<li><b>Check could not run:</b> {{.}}</li>{{end}}
+  {{range .Skipped}}<li>Not applicable: {{.}}</li>{{end}}
+</ul>
+
+<h2>Method</h2>
+<ul>
+  <li>Read-only AWS API calls from the engineer's machine; no agent was installed and no data left it.</li>
+  <li>Checks run: {{range $i, $c := .Checks}}{{if $i}}, {{end}}{{$c}}{{end}}.</li>
+  <li>A resource is called idle when metrics show no use over {{.IdleDays}} days (longer cycles such as monthly jobs would be missed). Young resources get lower confidence.</li>
+  <li>Each finding lists its evidence and what the check cannot see; verify those points with the owner before acting.</li>
+</ul>
+
+<h3>Inventory</h3>
+<table>
+  <tr><th>Type</th><th class="n">Count</th></tr>
+  {{range .Types}}<tr><td>{{.Label}}</td><td class="n">{{.N}}</td></tr>{{end}}
+</table>
+
+<footer>Generated {{.Generated}} by InfraLens {{.Version}}. Estimates only; no change was made to the audited account.</footer>
+</div>
+</body>
+</html>
+{{define "pfinding"}}
+<div class="pf {{.Severity}}">
+  <div class="top"><span><span class="sev {{.Severity}}">{{.Severity}}</span><span class="name">{{.Title}}</span></span>{{if .Cost}}<span class="cost">{{.Cost}}/mo</span>{{end}}</div>
+  <div class="small">{{.Source}}{{if gt .Affected 1}} · {{.Affected}} affected{{end}}{{if .Reference}} · {{.Reference}}{{end}}{{if .Confidence}} · {{.Confidence}} confidence{{end}}{{if .Effort}} · effort {{.Effort}}{{end}}</div>
+  {{if .Note}}<div class="small"><b>Owner's note:</b> {{.Note}}</div>{{end}}
+  {{if .Evidence}}<ul>{{range .Evidence}}<li>{{.}}</li>{{end}}</ul>{{end}}
+  {{if .Recommendation}}<div class="small"><b>What to do:</b> {{.Recommendation}}</div>{{end}}
+  {{if .Resources}}<div class="res">{{range $i, $r := .Resources}}{{if $i}}, {{end}}{{$r}}{{end}}{{if .MoreResources}} … and {{.MoreResources}} more{{end}}</div>{{end}}
+</div>
+{{end}}
+{{define "finding"}}
+<div class="finding {{.Confidence}}{{if .Note}} acked{{end}}">
+  <div class="top"><span class="name">{{.Name}}</span><span class="cost">{{.Cost}}/mo</span></div>
+  <div><span class="tag">{{.Type}}</span><span class="tag">{{.Region}}</span>{{if .Confidence}}<span class="tag {{.Confidence}}">{{.Confidence}} confidence</span>{{end}}</div>
+  {{if .Reason}}<div>{{.Reason}}</div>{{end}}
+  {{if .Note}}<div class="small"><b>Owner's note:</b> {{.Note}}</div>{{end}}
+  {{if .Evidence}}<ul>{{range .Evidence}}<li>{{.}}</li>{{end}}</ul>{{end}}
+</div>
+{{end}}
