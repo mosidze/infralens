@@ -24,6 +24,9 @@ conditional suggestions**, not verdicts: it does not know your plans.
 > every one of them becomes a regression test. Read-only access is enforced in
 > code and tested, so the risk is a wrong finding, not a changed account.
 
+> **Need an audit of your AWS account?** Fixed price from €900, read-only access,
+> written report in 5-7 working days: [ecix.ee/audit](https://ecix.ee/audit/).
+
 It looks at an account in three layers and joins them: **infrastructure**
 (what exists, how it is connected, who owns it, whether it is in Terraform or
 CloudFormation), **cost** (what each part really costs, taken from the bill
@@ -44,8 +47,8 @@ All screenshots are of the built-in synthetic example (`infralens demo`).
 
 ## Install
 
-Download a binary for Linux or macOS from the Releases page (checksums in
-`SHA256SUMS`), or build it:
+Download a binary for Linux or macOS from the [Releases page](../../releases)
+(checksums in `SHA256SUMS`), or build it from source (next section).
 
 ## Build
 
@@ -275,3 +278,5 @@ problem.
 
 Apache License 2.0 (see `LICENSE`). Components it embeds or links, and their
 licences, are listed in `THIRD_PARTY.md`.
+
+Maintained by [ECIX](https://ecix.ee/), DevSecOps consulting.
