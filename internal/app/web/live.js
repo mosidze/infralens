@@ -116,8 +116,10 @@ function render(snap) {
   if (!snap.incidents.length) {
     const q = el('div', 'quiet');
     q.append(el('b', null, 'No problems'));
-    const ok = snap.collectors.filter((c) => c.ok).length;
+    const ok = snap.collectors.filter((c) => c.ok && !c.disabled).length;
+    const off = snap.collectors.filter((c) => c.disabled);
     q.append(el('span', null, snap.blind && snap.blind.length ? 'but not every source is answering' : ok + ' source' + (ok === 1 ? '' : 's') + ' answering'));
+    off.forEach((c) => q.append(el('div', 'kind', c.name + ' is not available: ' + (c.why || ''))));
     board.append(q);
   }
   snap.incidents.forEach((inc) => {
@@ -141,15 +143,55 @@ function tick() {
   $('meta').textContent = parts.join(' · ');
 }
 
+const api = async (method, path, body) => {
+  const r = await fetch(path, {
+    method, headers: { 'X-Infralens': '1', 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let j = {};
+  try { j = await r.json(); } catch (e) { /* not JSON */ }
+  if (!r.ok) { const err = new Error(j.error || r.statusText); err.status = r.status; throw err; }
+  return j;
+};
+
+let stopped = true;
+async function showStart(note) {
+  last = null; stopped = true;
+  $('stop').hidden = true; $('counts').textContent = ''; $('meta').textContent = ''; $('blind').hidden = true;
+  document.title = 'Problem Monitor Live';
+  let profiles = [];
+  try { profiles = (await api('GET', '/api/state')).profiles || []; } catch (e) { /* none */ }
+  const board = $('board'); board.textContent = '';
+  const box = el('div', 'start');
+  box.append(el('h2', null, 'Not watching yet'), el('p', null, 'Choose an account. It must have been scanned once: the scan is the map this screen works from.'));
+  const row = el('div', 'row');
+  const sel = el('select');
+  profiles.forEach((p) => sel.append(new Option(p, p)));
+  const go = el('button', 'go', 'Start watching');
+  row.append(sel, go);
+  box.append(row);
+  const err = el('div', 'err'); if (note) err.textContent = note;
+  box.append(err);
+  go.addEventListener('click', async () => {
+    go.disabled = true; err.textContent = '';
+    try { await api('POST', '/api/live/start', { profile: sel.value }); stopped = false; poll(); }
+    catch (e) { err.textContent = e.message; go.disabled = false; }
+  });
+  board.append(box);
+}
+
 async function poll() {
   try {
-    const r = await fetch('/api/live/state', { headers: { 'X-Infralens': '1' } });
-    if (!r.ok) throw new Error(r.status === 404 ? 'The monitor is not running. Start it from the app.' : r.statusText);
-    render(await r.json());
+    const snap = await api('GET', '/api/live/state');
+    if (stopped) { stopped = false; }
+    $('stop').hidden = false;
+    render(snap);
   } catch (e) {
+    if (e.status === 404) { if (!stopped || !document.querySelector('.start')) showStart(); return; }
     const blind = $('blind'); blind.hidden = false; blind.textContent = 'Lost contact with InfraLens: ' + e.message;
   }
 }
+$('stop').addEventListener('click', async () => { await api('POST', '/api/live/stop', {}); showStart(); });
 
 $('fs').addEventListener('click', () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()));
 document.addEventListener('keydown', (e) => {

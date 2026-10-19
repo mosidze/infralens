@@ -60,6 +60,23 @@ func (g *Graph) Resolve(ref string) (string, bool) {
 	return "", false
 }
 
+// Regions lists the regions the scan found anything in, so the monitor only
+// asks about places that have something to look at.
+func (g *Graph) Regions() []string {
+	set := map[string]bool{}
+	for _, n := range g.nodes {
+		if n.Region != "" && n.Region != "global" {
+			set[n.Region] = true
+		}
+	}
+	var out []string
+	for r := range set {
+		out = append(out, r)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (g *Graph) neighbors(id string) []string { return g.adj[id] }
 
 func kindOf(t string) string { return strings.ReplaceAll(strings.TrimPrefix(t, "aws_"), "_", " ") }

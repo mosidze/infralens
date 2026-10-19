@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -422,5 +423,46 @@ func TestLiveScreenServesStateAndKeepsTheStrictPolicy(t *testing.T) {
 		if x := do(t, ts, "GET", p, "", nil); x.StatusCode != 200 {
 			t.Fatalf("%s: %d", p, x.StatusCode)
 		}
+	}
+}
+
+func TestMonitorStartStopThroughTheApiAndOnlyOneAtATime(t *testing.T) {
+	started := ""
+	hooks := Hooks{StartMonitor: func(ctx context.Context, profile string) (LiveSource, error) {
+		if profile == "bad" {
+			return nil, errors.New("no scan of \"bad\" yet")
+		}
+		started = profile
+		return fakeLive{}, nil
+	}}
+	_, ts, _ := newTestServer(t, hooks)
+
+	if r := do(t, ts, "POST", "/api/live/start", `{"profile":"a;rm -rf /"}`, nil); r.StatusCode != 400 {
+		t.Fatalf("odd profile: %d", r.StatusCode)
+	}
+	if r := do(t, ts, "POST", "/api/live/start", `{"profile":"bad"}`, nil); r.StatusCode != 400 {
+		t.Fatalf("hook error must reach the user: %d", r.StatusCode)
+	}
+	if r := do(t, ts, "GET", "/api/live/state", "", nil); r.StatusCode != 404 {
+		t.Fatalf("not started yet: %d", r.StatusCode)
+	}
+	if r := do(t, ts, "POST", "/api/live/start", `{"profile":"prod"}`, nil); r.StatusCode != 202 || started != "prod" {
+		t.Fatalf("start: %d %q", r.StatusCode, started)
+	}
+	if r := do(t, ts, "POST", "/api/live/start", `{"profile":"prod"}`, nil); r.StatusCode != 409 {
+		t.Fatalf("second start: %d", r.StatusCode)
+	}
+	if r := do(t, ts, "GET", "/api/live/state", "", nil); r.StatusCode != 200 {
+		t.Fatalf("running: %d", r.StatusCode)
+	}
+	if r := do(t, ts, "POST", "/api/live/stop", `{}`, nil); r.StatusCode != 200 {
+		t.Fatalf("stop: %d", r.StatusCode)
+	}
+	if r := do(t, ts, "GET", "/api/live/state", "", nil); r.StatusCode != 404 {
+		t.Fatalf("after stop: %d", r.StatusCode)
+	}
+	// writes need the custom header like every other write
+	if r := do(t, ts, "POST", "/api/live/start", `{"profile":"prod"}`, func(r *http.Request) { r.Header.Del("X-Infralens") }); r.StatusCode != 403 {
+		t.Fatalf("no header: %d", r.StatusCode)
 	}
 }

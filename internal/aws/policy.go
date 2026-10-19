@@ -65,6 +65,17 @@ var blastActions = []string{
 	"kinesis:ListStreamConsumers",
 }
 
+// WatchActions are what the live Problem Monitor calls. They are listed here,
+// next to the scan's, so `infralens policy --watch` stays honest.
+var WatchActions = []string{
+	"cloudwatch:DescribeAlarms",
+	"ecs:ListClusters", "ecs:ListServices", "ecs:DescribeServices", "ecs:ListTasks", "ecs:DescribeTasks",
+	"elasticloadbalancing:DescribeTargetGroups", "elasticloadbalancing:DescribeTargetHealth",
+	"rds:DescribeDBInstances", "rds:DescribeDBClusters",
+	"sqs:ListQueues", "sqs:GetQueueAttributes",
+	"health:DescribeEvents", "health:DescribeAffectedEntities",
+}
+
 // Policy builds the minimal read-only IAM policy for the given scanners.
 func Policy(scanners []Scanner, withBlast bool) ([]string, error) {
 	set := map[string]bool{}

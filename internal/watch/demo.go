@@ -58,7 +58,7 @@ func (d *Demo) Collect(_ context.Context, env *Env) ([]Observation, error) {
 			Threshold: "running below desired for 3 min",
 			Evidence:  []string{"2 tasks stopped: Essential container in task exited (exit code 137)", "the last deployment is still rolling out"},
 			Series:    ramp("RunningTaskCount", "tasks", now, 3, 1, 12*time.Minute),
-			Changes: []Change{{When: now.Add(-14 * time.Minute), Who: "deploy-bot", What: "ECS UpdateService: new task definition", Resource: "checkout-svc-03"}},
+			Changes:   []Change{{When: now.Add(-14 * time.Minute), Who: "deploy-bot", What: "ECS UpdateService: new task definition", Resource: "checkout-svc-03"}},
 		}})
 	}
 	if in(40*sec, 150*sec) {

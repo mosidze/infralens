@@ -878,6 +878,7 @@ func runPolicy(args []string) int {
 	services := fs.String("services", "", "limit to these checks")
 	skip := fs.String("skip", "", "leave out these checks")
 	noBlast := fs.Bool("no-blast", false, "leave out dependency lookups (Route53, CloudFront, route tables)")
+	withWatch := fs.Bool("watch", false, "also include what the live Problem Monitor needs")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -890,6 +891,18 @@ func runPolicy(args []string) int {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return exitError
+	}
+	if *withWatch {
+		seen := map[string]bool{}
+		for _, a := range acts {
+			seen[a] = true
+		}
+		for _, a := range awsDiscovery.WatchActions {
+			if !seen[a] {
+				acts = append(acts, a)
+			}
+		}
+		sort.Strings(acts)
 	}
 	doc, err := awsDiscovery.PolicyDocument(acts)
 	if err != nil {

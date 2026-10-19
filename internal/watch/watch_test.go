@@ -181,3 +181,26 @@ func TestBudgetIsFiftyCentsAndSlowsPollingWhenAhead(t *testing.T) {
 		t.Fatal("budget resets with the UTC day")
 	}
 }
+
+type unavailable struct{}
+
+func (unavailable) Name() string  { return "health" }
+func (unavailable) Metered() bool { return false }
+func (unavailable) Collect(context.Context, *Env) ([]Observation, error) {
+	return nil, errors.Join(ErrNotAvailable, errors.New("needs a Business support plan"))
+}
+
+func TestASourceTheAccountCannotUseIsSetAsideNotCalledBlind(t *testing.T) {
+	now := t0
+	r := &Runner{Collectors: []Collector{unavailable{}}, Tracker: NewTracker(1, 1), Graph: NewGraph(engine.ScanResult{}), Now: func() time.Time { return now }}
+	r.PollOnce(context.Background())
+	r.PollOnce(context.Background())
+	r.PollOnce(context.Background())
+	snap := r.Snapshot()
+	if len(snap.Blind) != 0 {
+		t.Fatalf("an unavailable source is not a failure: %v", snap.Blind)
+	}
+	if len(snap.Collectors) != 1 || !snap.Collectors[0].Disabled {
+		t.Fatalf("collectors: %+v", snap.Collectors)
+	}
+}

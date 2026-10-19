@@ -151,3 +151,12 @@ func TestGuardAllowsOnlyTheCredentialFlow(t *testing.T) {
 		}
 	}
 }
+
+func TestWatchActionsAreAllReads(t *testing.T) {
+	for _, a := range WatchActions {
+		op := a[strings.Index(a, ":")+1:]
+		if !IsReadOperation(op) {
+			t.Errorf("the monitor lists %s, which the read-only guard would refuse", a)
+		}
+	}
+}

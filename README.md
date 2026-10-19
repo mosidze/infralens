@@ -45,6 +45,36 @@ language model can then explain the result; it never produces numbers.
 
 All screenshots are of the built-in synthetic example (`infralens demo`).
 
+## Problem Monitor (live)
+
+A screen for a second monitor that shows **only what is wrong, right now**:
+nothing healthy is drawn, so an empty screen means quiet. Open it from the app
+(`Problem Monitor`) or at `/live`; `infralens serve --monitor PROFILE` starts it
+at once, and `--demo-live` shows scripted example problems without AWS.
+
+![Problem Monitor: incidents with the metric that caused them, what changed, and what is connected](docs/img/monitor.png)
+
+It asks AWS cheap, read-only questions every 30-60 seconds: CloudWatch alarms
+in ALARM, ECS services below their desired count or with a failed deployment
+(with why tasks stopped), unhealthy load-balancer targets, RDS/Aurora in a
+broken state, dead-letter queues that are not empty, and open AWS Health
+issues. A problem has to persist for a few polls before it is shown, and it
+needs a few clean polls to clear, so it does not flicker. Problems that touch
+each other are grouped into one incident, with what they are connected to
+(from your last scan), the owner and the cost.
+
+* Everything it calls is free. Metered CloudWatch metric calls (coming) have a
+  hard budget of $0.50 a day, shown on the screen, and polling slows down
+  instead of overspending.
+* It is not an APM: it sees AWS infrastructure state, not what happens inside
+  your applications or the memory and disk of an EC2 instance.
+* If it cannot see (expired credentials, an API that does not answer) it says
+  so in red, instead of showing a calm screen.
+* An owner note silences a live problem only if it names a rule starting with
+  `live.`, for example `{"match": {"name": "orders-*", "rule": "live.rds.bad-status"},
+  "note": "failover drill", "until": "2026-11-01"}`.
+* `infralens policy --watch` prints the extra read-only permissions it needs.
+
 ## Install
 
 Download a binary for Linux or macOS from the [Releases page](../../releases)

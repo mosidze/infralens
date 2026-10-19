@@ -5,6 +5,7 @@
 package watch
 
 import (
+	"errors"
 	"sort"
 	"time"
 )
@@ -22,6 +23,11 @@ func (s Severity) rank() int {
 	}
 	return 1
 }
+
+// ErrNotAvailable is returned by a collector whose source this account cannot
+// use (a Support plan it does not have, a service that is switched off). It is
+// not a failure: the source is set aside and the screen does not call it blind.
+var ErrNotAvailable = errors.New("not available")
 
 // Point is one sample of a metric.
 type Point struct {

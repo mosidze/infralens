@@ -37,6 +37,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/elasticache v1.63.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/firehose v1.52.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/guardduty v1.99.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/health v1.50.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/iam v1.64.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.21 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.11.7 // indirect

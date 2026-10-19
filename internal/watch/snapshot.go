@@ -34,6 +34,9 @@ type CollectorStatus struct {
 	Last   time.Time `json:"last,omitempty"`
 	Cost   string    `json:"cost,omitempty"` // free | metered
 	Signal int       `json:"signals"`
+	// Disabled marks a source this account cannot use; Why says what is missing.
+	Disabled bool   `json:"disabled,omitempty"`
+	Why      string `json:"why,omitempty"`
 }
 
 type Snapshot struct {
@@ -49,6 +52,8 @@ type Snapshot struct {
 	Collectors []CollectorStatus `json:"collectors"`
 	Budget     BudgetStatus      `json:"budget"`
 	Blind      []string          `json:"blind,omitempty"`
+	APICalls   int               `json:"api_calls,omitempty"`
+	Blocked    int               `json:"api_blocked,omitempty"`
 }
 
 // buildIncidents groups signals by resource, then joins resources that are

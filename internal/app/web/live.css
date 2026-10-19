@@ -45,3 +45,12 @@ main{flex:1;overflow:auto;padding:22px;display:grid;grid-template-columns:repeat
 body.kiosk header .muted,body.kiosk #fs{display:none}
 body.kiosk main{padding:28px}
 body.kiosk .name{font-size:19px}
+
+.start{grid-column:1/-1;margin:10vh auto;max-width:460px;text-align:center}
+.start h2{font-weight:500;font-size:24px;margin:0 0 6px}
+.start p{color:var(--mut);margin:0 0 18px}
+.start .row{display:flex;gap:8px;justify-content:center}
+.start select,.start input{font:inherit;background:var(--chip);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;min-width:220px}
+.start .go{background:var(--crit);border-color:var(--crit);color:#fff;padding:8px 16px}
+.start .err{color:var(--crit);margin-top:12px;font-size:14px}
+body.kiosk #stop{display:none}

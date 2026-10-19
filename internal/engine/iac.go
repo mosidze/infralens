@@ -61,7 +61,7 @@ type IaCSummary struct {
 	// SupportedTypes are the node types that state and stacks are matched
 	// against, so a viewer can tell "not found" from "cannot be compared".
 	SupportedTypes []string `json:"supported_types,omitempty"`
-	Notes        []string `json:"notes,omitempty"`
+	Notes          []string `json:"notes,omitempty"`
 }
 
 // iacTypes maps Terraform and CloudFormation resource types to the node type

@@ -141,3 +141,40 @@ func Since(t time.Time) string {
 	}
 	return fmt.Sprintf("%d d", int(d.Hours()/24))
 }
+
+// LatestForProfile returns the newest stored scan taken with a profile, across
+// accounts, or ErrNone. The live monitor uses it to learn what to watch.
+func LatestForProfile(base, profile string) (string, engine.ScanResult, error) {
+	var bestPath string
+	var best engine.ScanResult
+	accts, _ := os.ReadDir(filepath.Join(base, "history"))
+	for _, a := range accts {
+		if !a.IsDir() {
+			continue
+		}
+		dir := filepath.Join(base, "history", a.Name())
+		files, _ := os.ReadDir(dir)
+		var names []string
+		for _, f := range files {
+			if !f.IsDir() && strings.HasSuffix(f.Name(), ".json") {
+				names = append(names, f.Name())
+			}
+		}
+		sort.Strings(names)
+		for i := len(names) - 1; i >= 0 && i >= len(names)-3; i-- { // the last few are enough to find a match
+			p := filepath.Join(dir, names[i])
+			r, err := Read(p)
+			if err != nil || r.Profile != profile {
+				continue
+			}
+			if bestPath == "" || r.Timestamp.After(best.Timestamp) {
+				bestPath, best = p, r
+			}
+			break
+		}
+	}
+	if bestPath == "" {
+		return "", engine.ScanResult{}, ErrNone
+	}
+	return bestPath, best, nil
+}

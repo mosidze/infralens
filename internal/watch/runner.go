@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -17,6 +18,10 @@ type Collector interface {
 	Metered() bool
 	Collect(ctx context.Context, env *Env) ([]Observation, error)
 }
+
+// Paced is implemented by collectors that need to run less often than the
+// base interval (they make many calls, or the answer changes slowly).
+type Paced interface{ Every() time.Duration }
 
 // Env is what a collector may use.
 type Env struct {
@@ -40,6 +45,8 @@ type Runner struct {
 	Profile      string
 	Demo         bool
 	Now          func() time.Time
+	// Stats reports API calls made and blocked, for the screen's footer.
+	Stats func() (calls, blocked int)
 
 	mu         sync.Mutex
 	status     map[string]*CollectorStatus
@@ -79,9 +86,12 @@ func (r *Runner) PollOnce(ctx context.Context) {
 			r.status[name] = st
 		}
 		due := true
-		if c.Metered() && r.Budget != nil {
-			every := r.Budget.Pace(now, r.MeteredEvery)
-			due = now.Sub(r.lastRun[name]) >= every
+		if st.Disabled {
+			due = now.Sub(r.lastRun[name]) >= 30*time.Minute // look again now and then
+		} else if c.Metered() && r.Budget != nil {
+			due = now.Sub(r.lastRun[name]) >= r.Budget.Pace(now, r.MeteredEvery)
+		} else if p, ok := c.(Paced); ok {
+			due = now.Sub(r.lastRun[name]) >= p.Every()
 		}
 		r.mu.Unlock()
 		if !due {
@@ -94,6 +104,14 @@ func (r *Runner) PollOnce(ctx context.Context) {
 		r.mu.Lock()
 		r.lastRun[name] = now
 		st.Last = now
+		if err != nil && errors.Is(err, ErrNotAvailable) {
+			st.Disabled, st.OK, st.Error = true, true, ""
+			st.Why = oneLine(strings.TrimPrefix(err.Error(), ErrNotAvailable.Error()+": "), 160)
+			r.fails[name] = 0
+			r.mu.Unlock()
+			continue
+		}
+		st.Disabled, st.Why = false, ""
 		if err != nil {
 			r.fails[name]++
 			st.OK, st.Error = false, oneLine(err.Error(), 200)
@@ -180,6 +198,9 @@ func (r *Runner) Snapshot() Snapshot {
 	}
 	if r.Budget != nil {
 		snap.Budget = r.Budget.Status(now)
+	}
+	if r.Stats != nil {
+		snap.APICalls, snap.Blocked = r.Stats()
 	}
 	r.mu.Lock()
 	snap.UpdatedAt = r.updated

@@ -48,6 +48,8 @@ github.com/aws/aws-sdk-go-v2/service/firehose v1.52.4 h1:x7MK/eFmp5oDwNyLImQtswU
 github.com/aws/aws-sdk-go-v2/service/firehose v1.52.4/go.mod h1:s7UeaOIdimOKVe5kA6c1B95vmELpofmTXgPG8Z9y22g=
 github.com/aws/aws-sdk-go-v2/service/guardduty v1.99.1 h1:d2tyBBUAd5B5I4LU8mXWJhfNmT/yJNsEsE8XU/WCTkk=
 github.com/aws/aws-sdk-go-v2/service/guardduty v1.99.1/go.mod h1:l3W5Wgp0RS0VEP77x9Pp90oYoAh4p41rmZVu/6ynwbo=
+github.com/aws/aws-sdk-go-v2/service/health v1.50.2 h1:AkkSKz8EpViMp0JjcKsfEDjHCVaUBGzEFbtC38NGq5g=
+github.com/aws/aws-sdk-go-v2/service/health v1.50.2/go.mod h1:GQFUcoSox5vEn/Z0IMX/iMfCGFAt17xq8VQ8Dfrm/zU=
 github.com/aws/aws-sdk-go-v2/service/iam v1.64.4 h1:28xB3Sghdz+BOBpar3ksuZ6vdoGRxmcgowF/TRxvgsI=
 github.com/aws/aws-sdk-go-v2/service/iam v1.64.4/go.mod h1:3GrYbh2yqFzIvvRkkSvMaCSxgVyCKTR/Sd+1381K7HM=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.21 h1:e6YW5uME30TkrElR+4/xcY7NB6CCj2dcv7vtmGXhfhQ=

@@ -52,6 +52,13 @@ func (dc *DiscoveryClient) loadConfig(ctx context.Context, region string) (aws.C
 	return config.LoadDefaultConfig(ctx, opts...)
 }
 
+// Config returns an SDK configuration for a region with the read-only guard
+// and the profile's credentials, for callers outside this package that make
+// their own read calls (the live monitor).
+func (dc *DiscoveryClient) Config(ctx context.Context, region string) (aws.Config, error) {
+	return dc.loadConfig(ctx, region)
+}
+
 func (dc *DiscoveryClient) RunSSOLogin(ctx context.Context) error {
 	args := []string{"sso", "login"}
 	if dc.Profile != "" {
