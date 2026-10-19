@@ -4,19 +4,22 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"path/filepath"
-	"strings"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
 
 	"infralens/internal/app"
 	awsDiscovery "infralens/internal/aws"
+	"infralens/internal/demo"
 	"infralens/internal/history"
 	"infralens/internal/settings"
+	"infralens/internal/watch"
 )
 
 // runServe starts the local web application. It listens on loopback only and
@@ -26,6 +29,7 @@ func runServe(args []string) int {
 	addr := fs.String("addr", defaultServeAddr, "loopback address to listen on (port 0 = pick a free one)")
 	home := fs.String("home", "", "data directory (default ~/.infralens)")
 	noOpen := fs.Bool("no-open", false, "do not try to open the browser")
+	demoLive := fs.Bool("demo-live", false, "feed the Problem Monitor screen with scripted example problems (no AWS)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -51,7 +55,16 @@ func runServe(args []string) int {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return exitError
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	var live app.LiveSource
+	if *demoLive {
+		r := demoMonitor()
+		go r.Run(ctx)
+		live = r
+	}
 	srv, err := app.New(app.Config{
+		Live:  live,
 		Token: token,
 		Base:  base, Store: settings.NewStore(base), Version: version,
 		Hooks: app.Hooks{Profiles: awsDiscovery.ListProfiles, Scan: scanHook(base)},
@@ -68,8 +81,6 @@ func runServe(args []string) int {
 	if !*noOpen {
 		openBrowser(url)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
 	if err := srv.Serve(ctx, ln); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return exitError
@@ -102,6 +113,22 @@ func loadOrCreateToken(base string) (string, error) {
 		return "", err
 	}
 	return t, nil
+}
+
+// demoMonitor wires the Problem Monitor to the example scan and a scripted
+// source of problems.
+func demoMonitor() *watch.Runner {
+	res := demo.Scan(time.Now())
+	return &watch.Runner{
+		Collectors: []watch.Collector{&watch.Demo{Start: time.Now()}},
+		Tracker:    watch.NewTracker(1, 1),
+		Graph:      watch.NewGraph(res),
+		Budget:     watch.NewBudget(0.5),
+		Interval:   3 * time.Second,
+		Account:    demo.Account,
+		Profile:    "northwind-prod (example)",
+		Demo:       true,
+	}
 }
 
 func scanHook(base string) func(context.Context, app.ScanRequest, string, func(string)) (string, error) {

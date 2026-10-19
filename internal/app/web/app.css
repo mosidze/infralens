@@ -36,3 +36,6 @@ main.wide{max-width:none;padding:0}
 .maphead{display:flex;gap:12px;align-items:center;padding:8px 16px;background:var(--card);border-bottom:1px solid var(--line)}
 .maphead select{width:auto;max-width:60%}
 #mapframe{flex:1;border:0;width:100%;background:var(--bg)}
+
+nav a.navlink{color:var(--mut);padding:6px 12px;border-radius:6px;text-decoration:none;border:1px solid var(--line);margin-left:6px}
+nav a.navlink:hover{color:var(--fg)}

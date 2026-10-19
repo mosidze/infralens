@@ -14,6 +14,7 @@ import (
 	"infralens/internal/engine"
 	"infralens/internal/history"
 	"infralens/internal/settings"
+	"infralens/internal/watch"
 )
 
 func newTestServer(t *testing.T, hooks Hooks) (*Server, *httptest.Server, string) {
@@ -373,5 +374,53 @@ func TestAINodeNeedsConsentWhenRemoteAndValidatesAnswer(t *testing.T) {
 	r = do(t, ts, "POST", "/api/ai/node", `{"scan":"`+id+`","node":"vol-1"}`, nil)
 	if r.StatusCode != 409 {
 		t.Fatalf("remote without consent: %d", r.StatusCode)
+	}
+}
+
+type fakeLive struct{}
+
+func (fakeLive) Snapshot() watch.Snapshot {
+	return watch.Snapshot{Incidents: []watch.Incident{}, Collectors: []watch.CollectorStatus{}}
+}
+
+func TestLiveScreenNeedsTheTokenAndSaysWhenTheMonitorIsOff(t *testing.T) {
+	_, ts, _ := newTestServer(t, Hooks{})
+	if r := do(t, ts, "GET", "/api/live/state", "", nil); r.StatusCode != 404 {
+		t.Fatalf("monitor off: %d", r.StatusCode)
+	}
+	req, _ := http.NewRequest("GET", ts.URL+"/live", nil)
+	if resp, _ := http.DefaultClient.Do(req); resp.StatusCode != 401 {
+		t.Fatalf("the screen must not open without the token: %d", resp.StatusCode)
+	}
+	if r := do(t, ts, "GET", "/live", "", func(r *http.Request) { r.Host = "evil.example:80" }); r.StatusCode != 403 {
+		t.Fatalf("foreign host: %d", r.StatusCode)
+	}
+}
+
+func TestLiveScreenServesStateAndKeepsTheStrictPolicy(t *testing.T) {
+	base := t.TempDir()
+	s, err := New(Config{Base: base, Store: settings.NewStore(base), Token: "tok", Live: fakeLive{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	s.SetAllowedHosts(strings.TrimPrefix(ts.URL, "http://"))
+
+	r := do(t, ts, "GET", "/api/live/state", "", nil)
+	var snap map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&snap)
+	if r.StatusCode != 200 || snap["incidents"] == nil {
+		t.Fatalf("state: %d %v", r.StatusCode, snap)
+	}
+	g := do(t, ts, "GET", "/live", "", nil)
+	csp := g.Header.Get("Content-Security-Policy")
+	if g.StatusCode != 200 || !strings.Contains(csp, "script-src 'self'") || strings.Contains(csp, "unsafe-inline") {
+		t.Fatalf("live page: %d csp=%q", g.StatusCode, csp)
+	}
+	for _, p := range []string{"/static/live.js", "/static/live.css"} {
+		if x := do(t, ts, "GET", p, "", nil); x.StatusCode != 200 {
+			t.Fatalf("%s: %d", p, x.StatusCode)
+		}
 	}
 }

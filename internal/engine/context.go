@@ -151,3 +151,19 @@ func (c Context) Apply(res *ScanResult, now time.Time) []string {
 	}
 	return warn
 }
+
+// SuppressesLive reports whether an owner note silences a live problem. Only
+// notes that name a rule beginning with "live." count: a note written to
+// explain an audit finding ("idle by design") must not hide a real outage.
+func (c Context) SuppressesLive(id, name, typ, region, rule string, now time.Time) (string, bool) {
+	for _, n := range c.Notes {
+		m := n.Match
+		if !strings.HasPrefix(m.Rule, "live.") || m.Rule != "live."+rule || !n.live(now) {
+			continue
+		}
+		if n.matches(id, name, typ, "", region) {
+			return n.Note, true
+		}
+	}
+	return "", false
+}

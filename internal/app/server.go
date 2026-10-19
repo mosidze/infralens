@@ -31,6 +31,7 @@ import (
 	"infralens/internal/llm"
 	"infralens/internal/report"
 	"infralens/internal/settings"
+	"infralens/internal/watch"
 )
 
 //go:embed web/index.html
@@ -41,6 +42,15 @@ var appJS string
 
 //go:embed web/app.css
 var appCSS string
+
+//go:embed web/live.html
+var liveHTML string
+
+//go:embed web/live.js
+var liveJS string
+
+//go:embed web/live.css
+var liveCSS string
 
 // ScanRequest is what the browser may choose for a scan. Everything else
 // (thresholds, output paths, API log) is fixed by the server.
@@ -60,7 +70,14 @@ type Hooks struct {
 	Scan func(ctx context.Context, r ScanRequest, contextFile string, progress func(string)) (string, error)
 }
 
+// LiveSource supplies the Problem Monitor screen. A nil source means the
+// monitor is not running.
+type LiveSource interface {
+	Snapshot() watch.Snapshot
+}
+
 type Config struct {
+	Live    LiveSource
 	Base    string // ~/.infralens
 	Store   *settings.Store
 	Hooks   Hooks
@@ -159,6 +176,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /{$}", s.page(indexHTML, "text/html; charset=utf-8"))
 	mux.HandleFunc("GET /static/app.js", s.page(appJS, "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /static/app.css", s.page(appCSS, "text/css; charset=utf-8"))
+	mux.HandleFunc("GET /live", s.page(liveHTML, "text/html; charset=utf-8"))
+	mux.HandleFunc("GET /static/live.js", s.page(liveJS, "text/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /static/live.css", s.page(liveCSS, "text/css; charset=utf-8"))
+	mux.HandleFunc("GET /api/live/state", s.liveState)
 	mux.HandleFunc("GET /api/state", s.getState)
 	mux.HandleFunc("POST /api/scan", s.postScan)
 	mux.HandleFunc("POST /api/job/cancel", s.cancelJob)
@@ -230,6 +251,14 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) liveState(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Live == nil {
+		fail(w, 404, "the monitor is not running")
+		return
+	}
+	writeJSON(w, 200, s.cfg.Live.Snapshot())
 }
 
 func (s *Server) page(body, ctype string) http.HandlerFunc {
