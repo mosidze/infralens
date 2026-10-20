@@ -126,9 +126,38 @@ function renderChronic(groups) {
 }
 $('chronicBtn').addEventListener('click', () => { chronicOpen = !chronicOpen; if (last) renderChronic(last.chronic || []); });
 
+// The account being watched is shown and can be changed here. Scanning an
+// account does not move the monitor: it keeps watching what it was told to.
+let watchable = [], watchableAt = 0, watching = '';
+async function refreshWho(snap) {
+  const who = $('who');
+  if (snap.demo || !snap.profile) { who.hidden = true; return; }
+  watching = snap.profile;
+  if (Date.now() - watchableAt > 30000) {
+    watchableAt = Date.now();
+    try { watchable = [...new Set(((await api('GET', '/api/state')).scans || []).map((s) => s.profile).filter(Boolean))]; } catch (e) { /* keep the old list */ }
+  }
+  const list = watchable.includes(snap.profile) ? watchable : [snap.profile, ...watchable];
+  who.textContent = '';
+  list.forEach((p) => who.append(new Option(p === snap.profile && snap.account ? p + ' · ' + snap.account : p, p)));
+  who.value = snap.profile;
+  who.hidden = false;
+}
+$('who').addEventListener('change', async () => {
+  const to = $('who').value;
+  if (to === watching) return;
+  if (!confirm('Stop watching ' + watching + ' and watch ' + to + '?\n\n' + to + ' must have been scanned once.')) { $('who').value = watching; return; }
+  try {
+    await api('POST', '/api/live/stop', {});
+    await api('POST', '/api/live/start', { profile: to });
+    watchableAt = 0; poll();
+  } catch (e) { showStart(e.message); }
+});
+
 let last = null;
 function render(snap) {
   last = snap;
+  refreshWho(snap);
   $('demo').hidden = !snap.demo;
   const counts = $('counts'); counts.textContent = '';
   if (snap.crit) counts.append(el('span', 'cnt crit', snap.crit + ' critical'));
@@ -171,7 +200,6 @@ function tick() {
   if (last.updated_at && last.updated_at.indexOf('0001') !== 0) parts.push('checked ' + ago(Date.now() - new Date(last.updated_at).getTime()) + (Date.now() - new Date(last.updated_at).getTime() < 5000 ? '' : ' ago'));
   if (last.budget && last.budget.cap_usd) parts.push('metrics $' + last.budget.spent_usd.toFixed(2) + ' of $' + last.budget.cap_usd.toFixed(2) + ' today' + (last.budget.throttled ? ' (slowed)' : ''));
   if (last.suppressed) parts.push(last.suppressed + ' silenced by your notes');
-  if (last.profile) parts.push(last.profile);
   $('meta').textContent = parts.join(' · ');
 }
 

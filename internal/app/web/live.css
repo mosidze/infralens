@@ -65,3 +65,5 @@ button.ghost{background:transparent;color:var(--mut);border-color:var(--line)}
 
 body.embed h1,body.embed #fs{display:none}
 body.embed header{padding:8px 22px}
+
+#who{font:inherit;font-size:13px;background:var(--chip);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:3px 8px;max-width:300px}

@@ -86,6 +86,19 @@ function renderJob(j) {
         const b = el('button', {className: 'primary', textContent: 'Generate report'});
         b.addEventListener('click', () => pick(s));
         done.append(b);
+        // Scanning does not move the monitor; watching an account is its own choice.
+        const w = el('button', {textContent: 'Watch this account for problems'});
+        w.style.marginLeft = '8px';
+        w.addEventListener('click', async () => {
+          w.disabled = true;
+          try {
+            await api('POST', '/api/live/stop', {});
+            await api('POST', '/api/live/start', {profile: s.profile});
+            $('probframe').removeAttribute('src');
+            show('problems');
+          } catch (e) { w.disabled = false; done.append(el('p', {className: 'err', textContent: e.message})); }
+        });
+        done.append(w);
       }
     }
   }
