@@ -60,14 +60,24 @@ func (g *Graph) Resolve(ref string) (string, bool) {
 	return "", false
 }
 
-// Regions lists the regions the scan found anything in, so the monitor only
-// asks about places that have something to look at.
-func (g *Graph) Regions() []string {
+// Regions lists the regions the scan found something in, so the monitor only
+// asks about places that have something to look at. With node types given it
+// narrows to regions that hold at least one of them: there is no point asking
+// every region whether its ECS services are running when only one has any.
+func (g *Graph) Regions(nodeTypes ...string) []string {
+	want := map[string]bool{}
+	for _, t := range nodeTypes {
+		want[t] = true
+	}
 	set := map[string]bool{}
 	for _, n := range g.nodes {
-		if n.Region != "" && n.Region != "global" {
-			set[n.Region] = true
+		if n.Region == "" || n.Region == "global" {
+			continue
 		}
+		if len(want) > 0 && !want[n.Type] {
+			continue
+		}
+		set[n.Region] = true
 	}
 	var out []string
 	for r := range set {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -29,13 +30,15 @@ import (
 // asking about (those where the last scan found resources).
 type Source struct {
 	Clients Clients
-	Regions func() []string
+	// Regions returns the regions worth asking about, optionally only those
+	// holding resources of the given node types.
+	Regions func(nodeTypes ...string) []string
 }
 
 // Collectors returns the free-state collectors in the order the screen lists
 // them. None of them costs anything per call.
 func Collectors(s Source) []watch.Collector {
-	return []watch.Collector{&alarms{s}, &ecsC{s}, &elbC{s}, &rdsC{s}, &sqsC{s}, &healthC{s}}
+	return []watch.Collector{&alarms{s}, &ecsC{s: s}, &elbC{s}, &rdsC{s}, &sqsC{s: s}, &healthC{s}}
 }
 
 func oneLine(s string, n int) string {
@@ -46,16 +49,30 @@ func oneLine(s string, n int) string {
 	return s
 }
 
-// perRegion runs fn in each region and joins the results. A region that
-// fails fails the collector: a half-answer must not read as "all clear".
-func perRegion(ctx context.Context, s Source, fn func(region string) ([]watch.Observation, error)) ([]watch.Observation, error) {
+// perRegion runs fn in every region, a few at a time. A region that fails
+// fails the collector: a half-answer must not read as "all clear".
+func perRegion(ctx context.Context, s Source, nodeTypes []string, fn func(region string) ([]watch.Observation, error)) ([]watch.Observation, error) {
+	regions := s.Regions(nodeTypes...)
+	results := make([][]watch.Observation, len(regions))
+	errs := make([]error, len(regions))
+	sem := make(chan struct{}, 6)
+	var wg sync.WaitGroup
+	for i, r := range regions {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, r string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[i], errs[i] = fn(r)
+		}(i, r)
+	}
+	wg.Wait()
 	var out []watch.Observation
-	for _, r := range s.Regions() {
-		got, err := fn(r)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", r, err)
+	for i, r := range regions {
+		if errs[i] != nil {
+			return nil, fmt.Errorf("%s: %w", r, errs[i])
 		}
-		out = append(out, got...)
+		out = append(out, results[i]...)
 	}
 	return out, nil
 }
@@ -92,8 +109,35 @@ func dimensionRef(dims []cwTypes.Dimension) string {
 	return ""
 }
 
+// capacityControl reports whether an alarm only exists to drive Auto Scaling.
+// Target-tracking and step-scaling alarms sit in ALARM whenever a service is
+// under- or over-used; that is the scaler doing its job, not something being
+// ill, and on a busy account they outnumber real alarms a hundred to one.
+func capacityControl(name string, actions []string) bool {
+	if strings.HasPrefix(name, "TargetTracking-") {
+		return true
+	}
+	// alarms that exist to trigger scaling are named for it, whether or not a
+	// scaling policy is attached to them
+	low := strings.ToLower(name)
+	for _, w := range []string{"scale-in", "scale-out", "scalein", "scaleout", "scale_in", "scale_out", "alarmlow", "alarmhigh"} {
+		if strings.Contains(low, w) {
+			return true
+		}
+	}
+	if len(actions) == 0 {
+		return false
+	}
+	for _, a := range actions {
+		if !strings.Contains(a, ":autoscaling:") && !strings.Contains(a, "scalingPolicy") {
+			return false
+		}
+	}
+	return true
+}
+
 func (a *alarms) Collect(ctx context.Context, env *watch.Env) ([]watch.Observation, error) {
-	return perRegion(ctx, a.s, func(region string) ([]watch.Observation, error) {
+	return perRegion(ctx, a.s, nil, func(region string) ([]watch.Observation, error) {
 		cw, err := a.s.Clients.CloudWatch(ctx, region)
 		if err != nil {
 			return nil, err
@@ -109,6 +153,9 @@ func (a *alarms) Collect(ctx context.Context, env *watch.Env) ([]watch.Observati
 				return nil, err
 			}
 			for _, m := range page.MetricAlarms {
+				if capacityControl(aws.ToString(m.AlarmName), m.AlarmActions) {
+					continue
+				}
 				sev := watch.SevWarn
 				if aws.ToBool(m.ActionsEnabled) && len(m.AlarmActions) > 0 {
 					sev = watch.SevCrit // someone wired this alarm to be told about it
@@ -125,6 +172,9 @@ func (a *alarms) Collect(ctx context.Context, env *watch.Env) ([]watch.Observati
 				}})
 			}
 			for _, c := range page.CompositeAlarms {
+				if capacityControl(aws.ToString(c.AlarmName), c.AlarmActions) {
+					continue
+				}
 				sev := watch.SevWarn
 				if aws.ToBool(c.ActionsEnabled) && len(c.AlarmActions) > 0 {
 					sev = watch.SevCrit
@@ -163,13 +213,52 @@ func cmp(op cwTypes.ComparisonOperator) string {
 
 // ---- ECS ------------------------------------------------------------------------
 
-type ecsC struct{ s Source }
+// ecsC lists each cluster's services only now and then (they change rarely)
+// and asks about their state every minute, which keeps the call count low.
+type ecsC struct {
+	s     Source
+	mu    sync.Mutex
+	cache map[string]svcList
+}
 
-func (*ecsC) Name() string  { return "ecs" }
-func (*ecsC) Metered() bool { return false }
+type svcList struct {
+	arns []string
+	at   time.Time
+}
+
+const svcListTTL = 10 * time.Minute
+
+func (e *ecsC) services(ctx context.Context, api ecsAPI, cluster string, now time.Time) ([]string, error) {
+	e.mu.Lock()
+	if c, ok := e.cache[cluster]; ok && now.Sub(c.at) < svcListTTL {
+		e.mu.Unlock()
+		return c.arns, nil
+	}
+	e.mu.Unlock()
+	var arns []string
+	sp := ecs.NewListServicesPaginator(api, &ecs.ListServicesInput{Cluster: aws.String(cluster)})
+	for sp.HasMorePages() {
+		page, err := sp.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		arns = append(arns, page.ServiceArns...)
+	}
+	e.mu.Lock()
+	if e.cache == nil {
+		e.cache = map[string]svcList{}
+	}
+	e.cache[cluster] = svcList{arns, now}
+	e.mu.Unlock()
+	return arns, nil
+}
+
+func (*ecsC) Name() string         { return "ecs" }
+func (*ecsC) Metered() bool        { return false }
+func (*ecsC) Every() time.Duration { return time.Minute }
 
 func (e *ecsC) Collect(ctx context.Context, env *watch.Env) ([]watch.Observation, error) {
-	return perRegion(ctx, e.s, func(region string) ([]watch.Observation, error) {
+	return perRegion(ctx, e.s, []string{"aws_ecs_service", "aws_ecs_cluster"}, func(region string) ([]watch.Observation, error) {
 		api, err := e.s.Clients.ECS(ctx, region)
 		if err != nil {
 			return nil, err
@@ -182,14 +271,9 @@ func (e *ecsC) Collect(ctx context.Context, env *watch.Env) ([]watch.Observation
 				return nil, err
 			}
 			for _, cluster := range cpage.ClusterArns {
-				var arns []string
-				sp := ecs.NewListServicesPaginator(api, &ecs.ListServicesInput{Cluster: aws.String(cluster)})
-				for sp.HasMorePages() {
-					sp2, err := sp.NextPage(ctx)
-					if err != nil {
-						return nil, err
-					}
-					arns = append(arns, sp2.ServiceArns...)
+				arns, err := e.services(ctx, api, cluster, env.Now)
+				if err != nil {
+					return nil, err
 				}
 				for i := 0; i < len(arns); i += 10 {
 					end := i + 10
@@ -218,9 +302,13 @@ func (e *ecsC) problem(ctx context.Context, api ecsAPI, cluster string, svc ecsT
 	}
 	desired, running := svc.DesiredCount, svc.RunningCount
 	failedRollout := false
+	var since time.Time // when a failed deployment last moved: the earliest honest start we know
 	for _, d := range svc.Deployments {
 		if d.RolloutState == ecsTypes.DeploymentRolloutStateFailed {
 			failedRollout = true
+			if t := aws.ToTime(d.UpdatedAt); t.After(since) {
+				since = t
+			}
 		}
 	}
 	short := desired > 0 && running < desired
@@ -252,7 +340,7 @@ func (e *ecsC) problem(ctx context.Context, api ecsAPI, cluster string, svc ecsT
 		}
 	}
 	return watch.Observation{Signal: watch.Signal{
-		Kind: "ecs.under-replicated", NodeID: aws.ToString(svc.ServiceArn), Severity: sev, Title: title,
+		Kind: "ecs.under-replicated", NodeID: aws.ToString(svc.ServiceArn), Severity: sev, Title: title, Since: since,
 		Threshold: "running count below desired", Evidence: ev,
 	}}, true
 }
@@ -325,7 +413,7 @@ func (*elbC) Metered() bool        { return false }
 func (*elbC) Every() time.Duration { return time.Minute }
 
 func (e *elbC) Collect(ctx context.Context, env *watch.Env) ([]watch.Observation, error) {
-	return perRegion(ctx, e.s, func(region string) ([]watch.Observation, error) {
+	return perRegion(ctx, e.s, []string{"aws_lb"}, func(region string) ([]watch.Observation, error) {
 		api, err := e.s.Clients.ELB(ctx, region)
 		if err != nil {
 			return nil, err
@@ -387,8 +475,9 @@ func (e *elbC) Collect(ctx context.Context, env *watch.Env) ([]watch.Observation
 
 type rdsC struct{ s Source }
 
-func (*rdsC) Name() string  { return "rds" }
-func (*rdsC) Metered() bool { return false }
+func (*rdsC) Name() string         { return "rds" }
+func (*rdsC) Metered() bool        { return false }
+func (*rdsC) Every() time.Duration { return time.Minute }
 
 // badRDSStatus lists states that mean "broken", not "busy". Transient states
 // (modifying, backing-up, rebooting) are left out on purpose.
@@ -400,7 +489,7 @@ var badRDSStatus = map[string]bool{
 }
 
 func (r *rdsC) Collect(ctx context.Context, env *watch.Env) ([]watch.Observation, error) {
-	return perRegion(ctx, r.s, func(region string) ([]watch.Observation, error) {
+	return perRegion(ctx, r.s, []string{"aws_rds_instance"}, func(region string) ([]watch.Observation, error) {
 		api, err := r.s.Clients.RDS(ctx, region)
 		if err != nil {
 			return nil, err
@@ -445,19 +534,61 @@ func rdsObs(id, kind, status string) watch.Observation {
 
 // ---- dead-letter queues --------------------------------------------------------------
 
-type sqsC struct{ s Source }
+// sqsC watches dead-letter queues for *growth*. A queue that has held the same
+// messages for months is a backlog somebody has left alone, not something that
+// is sick now; one that is filling is. It remembers depths between polls, so
+// it needs a couple of polls before it can tell the two apart.
+type sqsC struct {
+	s    Source
+	mu   sync.Mutex
+	hist map[string][]depthPoint
+}
+
+type depthPoint struct {
+	t time.Time
+	n int
+}
+
+const dlqWindow = 45 * time.Minute
 
 func (*sqsC) Name() string         { return "sqs" }
 func (*sqsC) Metered() bool        { return false }
-func (*sqsC) Every() time.Duration { return 2 * time.Minute }
+func (*sqsC) Every() time.Duration { return 5 * time.Minute }
 
 func isDLQ(url string) bool {
 	n := strings.ToLower(url[strings.LastIndex(url, "/")+1:])
 	return strings.Contains(n, "dlq") || strings.Contains(n, "dead")
 }
 
+// observe records a depth and returns how much the queue has grown over the
+// window and whether there was an earlier reading to compare with.
+func (q *sqsC) observe(url string, n int, now time.Time) (grew int, known bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.hist == nil {
+		q.hist = map[string][]depthPoint{}
+	}
+	var keep []depthPoint
+	for _, p := range q.hist[url] {
+		if now.Sub(p.t) <= dlqWindow {
+			keep = append(keep, p)
+		}
+	}
+	if len(keep) > 0 {
+		base := keep[0].n
+		for _, p := range keep {
+			if p.n < base {
+				base = p.n
+			}
+		}
+		grew, known = n-base, true
+	}
+	q.hist[url] = append(keep, depthPoint{now, n})
+	return grew, known
+}
+
 func (q *sqsC) Collect(ctx context.Context, env *watch.Env) ([]watch.Observation, error) {
-	return perRegion(ctx, q.s, func(region string) ([]watch.Observation, error) {
+	return perRegion(ctx, q.s, []string{"aws_sqs_queue"}, func(region string) ([]watch.Observation, error) {
 		api, err := q.s.Clients.SQS(ctx, region)
 		if err != nil {
 			return nil, err
@@ -480,19 +611,26 @@ func (q *sqsC) Collect(ctx context.Context, env *watch.Env) ([]watch.Observation
 				}
 				var n int
 				fmt.Sscanf(a.Attributes[string(sqsTypes.QueueAttributeNameApproximateNumberOfMessages)], "%d", &n)
+				grew, known := q.observe(u, n, env.Now)
 				if n == 0 {
 					continue
 				}
-				sev := watch.SevWarn
-				if n >= 100 {
-					sev = watch.SevCrit
+				sig := watch.Signal{Kind: "sqs.dlq-growing", NodeID: u, Severity: watch.SevWarn,
+					Threshold: "a dead-letter queue is filling"}
+				switch {
+				case known && grew > 0:
+					if grew >= 100 {
+						sig.Severity = watch.SevCrit
+					}
+					sig.Title = fmt.Sprintf("dead-letter queue is filling: %d message(s), +%d recently", n, grew)
+					sig.Evidence = []string{"messages that failed processing keep arriving"}
+				default:
+					sig.Chronic = true
+					sig.Kind = "sqs.dlq-standing"
+					sig.Title = fmt.Sprintf("%d message(s) standing in a dead-letter queue", n)
+					sig.Evidence = []string{"the depth is not growing (or has only just been observed)"}
 				}
-				out = append(out, watch.Observation{Signal: watch.Signal{
-					Kind: "sqs.dlq-not-empty", NodeID: u, Severity: sev,
-					Title:     fmt.Sprintf("%d message(s) waiting in a dead-letter queue", n),
-					Threshold: "a dead-letter queue is not empty",
-					Evidence:  []string{"messages that failed processing and were set aside"},
-				}})
+				out = append(out, watch.Observation{Signal: sig})
 			}
 		}
 		return out, nil
@@ -505,7 +643,7 @@ type healthC struct{ s Source }
 
 func (*healthC) Name() string         { return "health" }
 func (*healthC) Metered() bool        { return false }
-func (*healthC) Every() time.Duration { return 2 * time.Minute }
+func (*healthC) Every() time.Duration { return 5 * time.Minute }
 
 func (h *healthC) Collect(ctx context.Context, env *watch.Env) ([]watch.Observation, error) {
 	api, err := h.s.Clients.Health(ctx)
@@ -523,8 +661,16 @@ func (h *healthC) Collect(ctx context.Context, env *watch.Env) ([]watch.Observat
 		}
 		return nil, err
 	}
+	watched := map[string]bool{"": true, "global": true}
+	for _, r := range h.s.Regions() {
+		watched[r] = true
+	}
 	var out []watch.Observation
 	for _, e := range ev.Events {
+		// An outage in a region where nothing of yours runs is not your problem.
+		if !watched[aws.ToString(e.Region)] {
+			continue
+		}
 		node := ""
 		sev := watch.SevWarn
 		if e.Arn != nil {

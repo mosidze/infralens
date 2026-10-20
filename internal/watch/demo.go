@@ -42,6 +42,15 @@ func (d *Demo) Collect(_ context.Context, env *Env) ([]Observation, error) {
 	sec := time.Second
 
 	var out []Observation
+	// standing problems are always there; they are listed apart, not carded
+	out = append(out,
+		Observation{Immediate: true, Signal: Signal{Kind: "alarm.firing", NodeID: "sessions-legacy", Severity: SevWarn, Since: now.Add(-12 * 24 * time.Hour),
+			Title: "sessions-read-throttle", Evidence: []string{"ReadThrottleEvents above 0 for 5 datapoints"}}},
+		Observation{Immediate: true, Signal: Signal{Kind: "ecs.under-replicated", NodeID: "batch-svc-07", Severity: SevCrit, Since: now.Add(-41 * 24 * time.Hour),
+			Title: "no tasks running (2 wanted)", Evidence: []string{"the latest deployment failed"}}},
+		Observation{Signal: Signal{Kind: "sqs.dlq-standing", NodeID: "clicks-raw", Severity: SevWarn, Chronic: true,
+			Title: "341 message(s) standing in a dead-letter queue", Evidence: []string{"the depth is not growing"}}},
+	)
 	if in(20*sec, 190*sec) {
 		out = append(out, Observation{Immediate: true, Signal: Signal{
 			Kind: "rds.replica-lag", NodeID: "orders-2", Severity: SevCrit, Since: since(20 * sec),

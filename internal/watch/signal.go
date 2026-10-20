@@ -66,6 +66,17 @@ type Signal struct {
 	Series    *Series   `json:"series,omitempty"`
 	Changes   []Change  `json:"changes,omitempty"`
 	Note      string    `json:"note,omitempty"` // set when an owner note suppressed it
+	// Chronic marks something that is wrong but not changing: a backlog that has
+	// stood for weeks, an alarm nobody cleared. It is real, but it is not what
+	// is sick right now, so it is kept off the board and listed on request.
+	Chronic bool `json:"chronic,omitempty"`
+}
+
+// ChronicAfter is how long a problem may stand before it counts as chronic.
+const ChronicAfter = 72 * time.Hour
+
+func (s Signal) chronic(now time.Time) bool {
+	return s.Chronic || (!s.Since.IsZero() && now.Sub(s.Since) > ChronicAfter)
 }
 
 // Observation is a signal as a collector saw it in one poll. Immediate marks

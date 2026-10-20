@@ -95,6 +95,35 @@ function renderNode(n) {
   return box;
 }
 
+const CHRONIC = {
+  'alarm.firing': 'Alarms that have stood in ALARM for more than 3 days',
+  'ecs.under-replicated': 'Services short of tasks for more than 3 days',
+  'sqs.dlq-standing': 'Dead-letter queues holding messages that are not changing',
+};
+let chronicOpen = false;
+function renderChronic(groups) {
+  const total = groups.reduce((a, g) => a + g.count, 0);
+  const btn = $('chronicBtn'), panel = $('chronic');
+  btn.hidden = total === 0;
+  if (!total) { panel.hidden = true; return; }
+  btn.textContent = total + ' standing ' + (chronicOpen ? '▴' : '▾');
+  btn.title = 'Wrong, but not changing: not what is sick right now';
+  panel.hidden = !chronicOpen;
+  panel.textContent = '';
+  groups.forEach((g) => {
+    panel.append(el('h3', null, (CHRONIC[g.kind] || g.kind) + ' (' + g.count + ')'));
+    g.items.forEach((it) => {
+      const row = el('div', 'item');
+      row.append(el('span', 'n', it.name));
+      let d = it.title;
+      if (it.since && it.since.indexOf('0001') !== 0) d += ' · for ' + ago(Date.now() - new Date(it.since).getTime());
+      row.append(el('span', 'd', d));
+      panel.append(row);
+    });
+  });
+}
+$('chronicBtn').addEventListener('click', () => { chronicOpen = !chronicOpen; if (last) renderChronic(last.chronic || []); });
+
 let last = null;
 function render(snap) {
   last = snap;
@@ -104,6 +133,7 @@ function render(snap) {
   if (snap.warn) counts.append(el('span', 'cnt warn', snap.warn + ' warning'));
   const n = snap.crit + snap.warn;
   document.title = (n ? '(' + n + ') ' : '') + 'Problem Monitor Live';
+  renderChronic(snap.chronic || []);
 
   const blind = $('blind'); blind.textContent = '';
   blind.hidden = !(snap.blind && snap.blind.length);
@@ -157,7 +187,7 @@ const api = async (method, path, body) => {
 let stopped = true;
 async function showStart(note) {
   last = null; stopped = true;
-  $('stop').hidden = true; $('counts').textContent = ''; $('meta').textContent = ''; $('blind').hidden = true;
+  $('stop').hidden = true; $('chronicBtn').hidden = true; $('chronic').hidden = true; $('counts').textContent = ''; $('meta').textContent = ''; $('blind').hidden = true;
   document.title = 'Problem Monitor Live';
   let profiles = [];
   try { profiles = (await api('GET', '/api/state')).profiles || []; } catch (e) { /* none */ }

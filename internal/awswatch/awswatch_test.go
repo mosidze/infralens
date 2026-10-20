@@ -138,7 +138,7 @@ func src(f *fake, regions ...string) Source {
 	if len(regions) == 0 {
 		regions = []string{"eu-west-1"}
 	}
-	return Source{Clients: f, Regions: func() []string { return regions }}
+	return Source{Clients: f, Regions: func(...string) []string { return regions }}
 }
 
 func env(nodes ...engine.ResourceNode) *watch.Env {
@@ -205,7 +205,7 @@ func TestEcsReportsOnlyServicesThatAreShortOrFailed(t *testing.T) {
 			{StoppedReason: aws.String("Essential container in task exited"), Containers: []ecsTypes.Container{{ExitCode: aws.Int32(137)}}},
 		},
 	}
-	obs, err := (&ecsC{src(f)}).Collect(context.Background(), env())
+	obs, err := (&ecsC{s: src(f)}).Collect(context.Background(), env())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestEcsAsksForServicesTenAtATime(t *testing.T) {
 		list = append(list, ecsTypes.Service{ServiceArn: aws.String("arn:s" + string(rune('a'+i))), Status: aws.String("ACTIVE"), DesiredCount: 1, RunningCount: 1})
 	}
 	f := &fake{clusters: []string{"c"}, services: map[string][]ecsTypes.Service{"c": list}}
-	if _, err := (&ecsC{src(f)}).Collect(context.Background(), env()); err != nil { // the fake panics above 10
+	if _, err := (&ecsC{s: src(f)}).Collect(context.Background(), env()); err != nil { // the fake panics above 10
 		t.Fatal(err)
 	}
 }
@@ -298,29 +298,53 @@ func TestRdsBrokenStatesOnlyNotBusyOnes(t *testing.T) {
 	}
 }
 
-func TestOnlyDeadLetterQueuesAreInspectedAndOnlyWhenNotEmpty(t *testing.T) {
+func TestDeadLetterQueuesAreJudgedByGrowthNotByNotBeingEmpty(t *testing.T) {
 	u := func(n string) string { return "https://sqs.eu-west-1.amazonaws.com/1/" + n }
 	f := &fake{
 		queues: []string{u("orders"), u("orders-dlq"), u("payments-deadletter"), u("empty-DLQ")},
-		depth:  map[string]string{u("orders-dlq"): "3", u("payments-deadletter"): "150", u("empty-DLQ"): "0"},
+		depth:  map[string]string{u("orders-dlq"): "3", u("payments-deadletter"): "1000", u("empty-DLQ"): "0"},
 	}
-	obs, err := (&sqsC{src(f)}).Collect(context.Background(), env())
-	if err != nil || len(obs) != 2 {
-		t.Fatalf("obs %d err %v", len(obs), err)
+	c := &sqsC{s: src(f)}
+	t0 := now
+	poll := func(at time.Time) map[string]watch.Observation {
+		obs, err := c.Collect(context.Background(), &watch.Env{Graph: watch.NewGraph(engine.ScanResult{}), Now: at})
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]watch.Observation{}
+		for _, o := range obs {
+			m[o.NodeID[strings.LastIndex(o.NodeID, "/")+1:]] = o
+		}
+		return m
+	}
+
+	first := poll(t0)
+	if len(first) != 2 {
+		t.Fatalf("only non-empty dead-letter queues: %d", len(first))
+	}
+	for name, o := range first {
+		if !o.Chronic {
+			t.Fatalf("%s: the first reading cannot tell growth from a standing backlog, so it must not alarm", name)
+		}
 	}
 	for _, c := range f.attrsCalled {
 		if strings.HasSuffix(c, "/orders") {
 			t.Fatal("a regular queue must not even be asked about")
 		}
 	}
-	for _, o := range obs {
-		want := watch.SevWarn
-		if strings.HasSuffix(o.NodeID, "payments-deadletter") {
-			want = watch.SevCrit
-		}
-		if o.Severity != want {
-			t.Fatalf("%s severity %s", o.NodeID, o.Severity)
-		}
+	second := poll(t0.Add(2 * time.Minute))
+	if !second["payments-deadletter"].Chronic {
+		t.Fatal("a queue whose depth did not change is a standing backlog")
+	}
+
+	f.depth[u("payments-deadletter")] = "1250"
+	f.depth[u("orders-dlq")] = "4"
+	third := poll(t0.Add(4 * time.Minute))
+	if o := third["payments-deadletter"]; o.Chronic || o.Severity != watch.SevCrit || !strings.Contains(o.Title, "+250") {
+		t.Fatalf("a queue that gained 250 messages is sick now: %+v", o)
+	}
+	if o := third["orders-dlq"]; o.Chronic || o.Severity != watch.SevWarn {
+		t.Fatalf("a small increase is a warning: %+v", o)
 	}
 }
 
@@ -386,9 +410,67 @@ func TestRunnerWithTheRealCollectorsRaisesSlowOnesLateAndFastOnesAtOnce(t *testi
 	if snap.Crit+snap.Warn != 1 {
 		t.Fatalf("after one poll only the alarm should show: %+v", snap.Incidents)
 	}
-	clock = clock.Add(31 * time.Second)
+	clock = clock.Add(61 * time.Second)
 	r.PollOnce(context.Background())
 	if s := r.Snapshot(); s.Crit+s.Warn != 2 {
 		t.Fatalf("after two polls the ecs problem shows too: %+v", s.Incidents)
+	}
+}
+
+func TestAutoScalingAlarmsAreNotIllnessEvenWhenTheyAreInAlarm(t *testing.T) {
+	scale := "arn:aws:autoscaling:eu-west-1:1:scalingPolicy:abc:resource/ecs/service/c/s:policyName/p"
+	f := &fake{alarms: []cwTypes.MetricAlarm{
+		{AlarmName: aws.String("TargetTracking-service/c/s-AlarmLow-1"), AlarmActions: []string{scale}, ActionsEnabled: aws.Bool(true)},
+		{AlarmName: aws.String("q_sqs-scale-in"), AlarmActions: []string{scale}, ActionsEnabled: aws.Bool(true)},
+		{AlarmName: aws.String("custom-name-but-scaling-only"), AlarmActions: []string{scale, scale}, ActionsEnabled: aws.Bool(true)},
+		{AlarmName: aws.String("pages-and-scales"), AlarmActions: []string{scale, "arn:aws:sns:eu-west-1:1:oncall"}, ActionsEnabled: aws.Bool(true)},
+		{AlarmName: aws.String("real-alarm"), AlarmActions: []string{"arn:aws:sns:eu-west-1:1:oncall"}, ActionsEnabled: aws.Bool(true)},
+	}}
+	obs, err := (&alarms{src(f)}).Collect(context.Background(), env())
+	if err != nil || len(obs) != 2 {
+		t.Fatalf("only the two alarms that tell a person should remain, got %d (%v)", len(obs), err)
+	}
+	m := byKind(obs)
+	if _, ok := m["alarm.firing|pages-and-scales"]; !ok {
+		t.Fatal("an alarm that also notifies a person is not capacity control")
+	}
+	if _, ok := m["alarm.firing|real-alarm"]; !ok {
+		t.Fatal("real alarm lost")
+	}
+}
+
+func TestHealthIssuesInRegionsYouDoNotUseAreIgnored(t *testing.T) {
+	f := &fake{events: []healthTypes.Event{
+		{Arn: aws.String("e1"), EventTypeCode: aws.String("AWS_X_ISSUE"), Service: aws.String("X"), Region: aws.String("me-central-1")},
+		{Arn: aws.String("e2"), EventTypeCode: aws.String("AWS_Y_ISSUE"), Service: aws.String("Y"), Region: aws.String("eu-west-1")},
+		{Arn: aws.String("e3"), EventTypeCode: aws.String("AWS_Z_ISSUE"), Service: aws.String("Z"), Region: aws.String("global")},
+	}}
+	obs, err := (&healthC{src(f, "eu-west-1")}).Collect(context.Background(), env())
+	if err != nil || len(obs) != 2 {
+		t.Fatalf("obs %d err %v", len(obs), err)
+	}
+}
+
+func TestScalingAlarmsAreRecognisedByNameEvenWithoutAPolicy(t *testing.T) {
+	f := &fake{alarms: []cwTypes.MetricAlarm{
+		{AlarmName: aws.String("bad-eddy_sqs-scale-in")}, {AlarmName: aws.String("x-ScaleOut-high")}, {AlarmName: aws.String("db-cpu-high")},
+	}}
+	obs, _ := (&alarms{src(f)}).Collect(context.Background(), env())
+	if len(obs) != 1 || obs[0].Title != "db-cpu-high" {
+		t.Fatalf("%+v", obs)
+	}
+}
+
+func TestOnlyRegionsHoldingTheKindOfResourceAreAsked(t *testing.T) {
+	g := watch.NewGraph(engine.ScanResult{Nodes: []engine.ResourceNode{
+		{ID: "svc", Type: "aws_ecs_service", Region: "eu-west-1"},
+		{ID: "lb", Type: "aws_lb", Region: "eu-north-1"},
+		{ID: "x", Type: "aws_s3_bucket", Region: "us-east-2"},
+	}})
+	if got := g.Regions("aws_ecs_service"); len(got) != 1 || got[0] != "eu-west-1" {
+		t.Fatalf("ecs regions %v", got)
+	}
+	if got := g.Regions(); len(got) != 3 {
+		t.Fatalf("all regions %v", got)
 	}
 }

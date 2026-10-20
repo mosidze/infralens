@@ -10,8 +10,9 @@ import (
 // screen that is meant to be quiet.
 type Tracker struct {
 	mu      sync.Mutex
-	need    int // consecutive polls before a signal is shown
-	clear   int // consecutive polls without it before it goes away
+	need    int            // consecutive polls before a signal is shown
+	needBy  map[string]int // per source, for collectors that poll slowly
+	clear   int            // consecutive polls without it before it goes away
 	entries map[string]*entry
 }
 
@@ -35,6 +36,24 @@ func NewTracker(need, clear int) *Tracker {
 	return &Tracker{need: need, clear: clear, entries: map[string]*entry{}}
 }
 
+// SetNeed overrides how many consecutive sightings a source needs. A source
+// polled every five minutes cannot reasonably wait for three.
+func (t *Tracker) SetNeed(source string, n int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.needBy == nil {
+		t.needBy = map[string]int{}
+	}
+	t.needBy[source] = n
+}
+
+func (t *Tracker) needFor(source string) int {
+	if n, ok := t.needBy[source]; ok {
+		return n
+	}
+	return t.need
+}
+
 // Apply records one poll. `collected` lists the collectors that answered: a
 // collector that failed says nothing about its signals, so they are kept as
 // they were instead of being cleared by silence.
@@ -56,7 +75,7 @@ func (t *Tracker) Apply(obs []Observation, collected map[string]bool, now time.T
 		e.sig.Since = e.since
 		e.missing = 0
 		e.seen++
-		if o.Immediate || e.seen >= t.need {
+		if o.Immediate || e.seen >= t.needFor(o.Source) {
 			e.shown = true
 		}
 	}

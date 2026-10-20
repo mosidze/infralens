@@ -54,3 +54,11 @@ body.kiosk .name{font-size:19px}
 .start .go{background:var(--crit);border-color:var(--crit);color:#fff;padding:8px 16px}
 .start .err{color:var(--crit);margin-top:12px;font-size:14px}
 body.kiosk #stop{display:none}
+
+button.ghost{background:transparent;color:var(--mut);border-color:var(--line)}
+#chronic{padding:14px 22px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--card) 60%,var(--bg));max-height:40vh;overflow:auto}
+#chronic h3{margin:10px 0 4px;font-size:13px;font-weight:600;color:var(--mut)}
+#chronic h3:first-child{margin-top:0}
+#chronic .item{display:flex;gap:10px;font-size:13px;padding:2px 0;color:var(--fg)}
+#chronic .item .n{min-width:260px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#chronic .item .d{color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

@@ -27,6 +27,21 @@ type Incident struct {
 	Nodes    []NodeView `json:"nodes"`
 }
 
+// ChronicItem is one standing problem, listed without a card.
+type ChronicItem struct {
+	Name   string    `json:"name"`
+	Title  string    `json:"title"`
+	Since  time.Time `json:"since,omitempty"`
+	Detail string    `json:"detail,omitempty"`
+}
+
+// ChronicGroup gathers standing problems of one kind.
+type ChronicGroup struct {
+	Kind  string        `json:"kind"`
+	Count int           `json:"count"`
+	Items []ChronicItem `json:"items"`
+}
+
 type CollectorStatus struct {
 	Name   string    `json:"name"`
 	OK     bool      `json:"ok"`
@@ -48,6 +63,7 @@ type Snapshot struct {
 	Crit       int               `json:"crit"`
 	Warn       int               `json:"warn"`
 	Incidents  []Incident        `json:"incidents"`
+	Chronic    []ChronicGroup    `json:"chronic"`
 	Suppressed int               `json:"suppressed,omitempty"`
 	Collectors []CollectorStatus `json:"collectors"`
 	Budget     BudgetStatus      `json:"budget"`

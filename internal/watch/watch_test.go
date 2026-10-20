@@ -204,3 +204,39 @@ func TestASourceTheAccountCannotUseIsSetAsideNotCalledBlind(t *testing.T) {
 		t.Fatalf("collectors: %+v", snap.Collectors)
 	}
 }
+
+type fixed struct{ obs []Observation }
+
+func (fixed) Name() string                                           { return "x" }
+func (fixed) Metered() bool                                          { return false }
+func (f fixed) Collect(context.Context, *Env) ([]Observation, error) { return f.obs, nil }
+
+func TestStandingProblemsAreListedApartAndDoNotCountAsIllnessNow(t *testing.T) {
+	old := Observation{Immediate: true, Signal: Signal{Kind: "alarm.firing", NodeID: "", Severity: SevCrit, Title: "stale alarm", Since: t0.Add(-5 * 24 * time.Hour)}}
+	flagged := Observation{Immediate: true, Signal: Signal{Kind: "sqs.dlq-standing", NodeID: "q", Severity: SevWarn, Title: "backlog", Chronic: true}}
+	fresh := Observation{Immediate: true, Signal: Signal{Kind: "ecs.under-replicated", NodeID: "svc", Severity: SevCrit, Title: "down", Since: t0.Add(-10 * time.Minute)}}
+	now := t0
+	r := &Runner{Collectors: []Collector{fixed{[]Observation{old, flagged, fresh}}}, Tracker: NewTracker(1, 1), Graph: NewGraph(engine.ScanResult{}), Now: func() time.Time { return now }}
+	r.PollOnce(context.Background())
+	snap := r.Snapshot()
+	if snap.Crit != 1 || snap.Warn != 0 || len(snap.Incidents) != 1 {
+		t.Fatalf("only the fresh problem is sick now: crit=%d warn=%d incidents=%d", snap.Crit, snap.Warn, len(snap.Incidents))
+	}
+	total := 0
+	for _, g := range snap.Chronic {
+		total += g.Count
+	}
+	if total != 2 {
+		t.Fatalf("both standing problems must still be listed: %+v", snap.Chronic)
+	}
+}
+
+func TestSlowSourcesCanAskForFewerSightings(t *testing.T) {
+	tr := NewTracker(3, 1)
+	tr.SetNeed("elb", 1)
+	tr.Apply([]Observation{obs("a", "elb", false), obs("b", "ecs", false)}, map[string]bool{"elb": true, "ecs": true}, t0)
+	v := tr.Visible()
+	if len(v) != 1 || v[0].Key != "a" {
+		t.Fatalf("only the slow source's signal should show after one sighting: %+v", v)
+	}
+}

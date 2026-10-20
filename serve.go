@@ -29,6 +29,7 @@ func runServe(args []string) int {
 	addr := fs.String("addr", defaultServeAddr, "loopback address to listen on (port 0 = pick a free one)")
 	home := fs.String("home", "", "data directory (default ~/.infralens)")
 	noOpen := fs.Bool("no-open", false, "do not try to open the browser")
+	apiLog := fs.String("api-log", "", "write every AWS call the monitor makes (JSON lines) to this file")
 	monitor := fs.String("monitor", "", "start the Problem Monitor for this profile right away")
 	demoLive := fs.Bool("demo-live", false, "feed the Problem Monitor screen with scripted example problems (no AWS)")
 	if err := fs.Parse(args); err != nil {
@@ -60,7 +61,7 @@ func runServe(args []string) int {
 	defer stop()
 	var live app.LiveSource
 	if *monitor != "" {
-		src, err := monitorHook(base)(ctx, *monitor)
+		src, err := monitorHook(base, *apiLog)(ctx, *monitor)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			return exitError
@@ -76,7 +77,7 @@ func runServe(args []string) int {
 		Live:  live,
 		Token: token,
 		Base:  base, Store: settings.NewStore(base), Version: version,
-		Hooks: app.Hooks{Profiles: awsDiscovery.ListProfiles, Scan: scanHook(base), StartMonitor: monitorHook(base)},
+		Hooks: app.Hooks{Profiles: awsDiscovery.ListProfiles, Scan: scanHook(base), StartMonitor: monitorHook(base, *apiLog)},
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)

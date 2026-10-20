@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -51,6 +52,7 @@ type Runner struct {
 	mu         sync.Mutex
 	status     map[string]*CollectorStatus
 	lastRun    map[string]time.Time
+	busy       map[string]bool
 	fails      map[string]int
 	updated    time.Time
 	suppressed int
@@ -63,17 +65,24 @@ func (r *Runner) now() time.Time {
 	return time.Now()
 }
 
-// PollOnce runs every collector that is due.
+// PollOnce runs every collector that is due and waits for them all.
 func (r *Runner) PollOnce(ctx context.Context) {
+	r.launch(ctx).Wait()
+}
+
+// launch starts every due collector on its own goroutine and returns at once.
+// A slow collector (many regions, many calls) must not keep a fast one's
+// answer off the screen, and a collector that is still running is not started
+// again.
+func (r *Runner) launch(ctx context.Context) *sync.WaitGroup {
 	now := r.now()
 	r.mu.Lock()
 	if r.status == nil {
-		r.status, r.lastRun, r.fails = map[string]*CollectorStatus{}, map[string]time.Time{}, map[string]int{}
+		r.status, r.lastRun, r.fails, r.busy = map[string]*CollectorStatus{}, map[string]time.Time{}, map[string]int{}, map[string]bool{}
 	}
 	r.mu.Unlock()
 
-	var obs []Observation
-	collected := map[string]bool{}
+	wg := &sync.WaitGroup{}
 	for _, c := range r.Collectors {
 		name := c.Name()
 		r.mu.Lock()
@@ -85,60 +94,80 @@ func (r *Runner) PollOnce(ctx context.Context) {
 			}
 			r.status[name] = st
 		}
-		due := true
-		if st.Disabled {
-			due = now.Sub(r.lastRun[name]) >= 30*time.Minute // look again now and then
-		} else if c.Metered() && r.Budget != nil {
-			due = now.Sub(r.lastRun[name]) >= r.Budget.Pace(now, r.MeteredEvery)
-		} else if p, ok := c.(Paced); ok {
-			due = now.Sub(r.lastRun[name]) >= p.Every()
+		due := !r.busy[name]
+		if due {
+			if st.Disabled {
+				due = now.Sub(r.lastRun[name]) >= 30*time.Minute // look again now and then
+			} else if c.Metered() && r.Budget != nil {
+				due = now.Sub(r.lastRun[name]) >= r.Budget.Pace(now, r.MeteredEvery)
+			} else if p, ok := c.(Paced); ok {
+				due = now.Sub(r.lastRun[name]) >= p.Every()
+			}
+		}
+		if due {
+			r.busy[name] = true
 		}
 		r.mu.Unlock()
 		if !due {
 			continue
 		}
-		cctx, cancel := context.WithTimeout(ctx, 25*time.Second)
-		got, err := c.Collect(cctx, &Env{Graph: r.Graph, Now: now, Budget: r.Budget})
-		cancel()
-
-		r.mu.Lock()
-		r.lastRun[name] = now
-		st.Last = now
-		if err != nil && errors.Is(err, ErrNotAvailable) {
-			st.Disabled, st.OK, st.Error = true, true, ""
-			st.Why = oneLine(strings.TrimPrefix(err.Error(), ErrNotAvailable.Error()+": "), 160)
-			r.fails[name] = 0
-			r.mu.Unlock()
-			continue
-		}
-		st.Disabled, st.Why = false, ""
-		if err != nil {
-			r.fails[name]++
-			st.OK, st.Error = false, oneLine(err.Error(), 200)
-			r.mu.Unlock()
-			continue // its signals stay as they were: silence is not recovery
-		}
-		r.fails[name] = 0
-		st.OK, st.Error, st.Signal = true, "", len(got)
-		r.mu.Unlock()
-		collected[name] = true
-		for _, o := range got {
-			o.Source = name
-			if o.NodeID != "" {
-				if id, ok := r.Graph.Resolve(o.NodeID); ok {
-					o.NodeID = id
-				}
-			}
-			if o.Key == "" {
-				o.Key = name + "|" + o.Kind + "|" + o.NodeID
-			}
-			obs = append(obs, o)
-		}
+		wg.Add(1)
+		go func(c Collector) {
+			defer wg.Done()
+			r.runOne(ctx, c, now)
+		}(c)
 	}
-	r.Tracker.Apply(obs, collected, now)
+	return wg
+}
+
+// runOne runs one collector and applies its answer to the tracker at once, so
+// the screen does not wait for the slowest source.
+func (r *Runner) runOne(ctx context.Context, c Collector, now time.Time) {
+	name := c.Name()
+	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	got, err := c.Collect(cctx, &Env{Graph: r.Graph, Now: now, Budget: r.Budget})
+	cancel()
+
 	r.mu.Lock()
-	r.updated = now
+	st := r.status[name]
+	r.busy[name] = false
+	r.lastRun[name] = r.now()
+	st.Last = r.lastRun[name]
+	if err != nil && errors.Is(err, ErrNotAvailable) {
+		st.Disabled, st.OK, st.Error = true, true, ""
+		st.Why = oneLine(strings.TrimPrefix(err.Error(), ErrNotAvailable.Error()+": "), 160)
+		r.fails[name] = 0
+		r.updated = st.Last
+		r.mu.Unlock()
+		return
+	}
+	st.Disabled, st.Why = false, ""
+	if err != nil {
+		r.fails[name]++
+		st.OK, st.Error = false, oneLine(err.Error(), 200)
+		r.updated = st.Last
+		r.mu.Unlock()
+		return // its signals stay as they were: silence is not recovery
+	}
+	r.fails[name] = 0
+	st.OK, st.Error, st.Signal = true, "", len(got)
+	r.updated = st.Last
 	r.mu.Unlock()
+
+	var obs []Observation
+	for _, o := range got {
+		o.Source = name
+		if o.NodeID != "" {
+			if id, ok := r.Graph.Resolve(o.NodeID); ok {
+				o.NodeID = id
+			}
+		}
+		if o.Key == "" {
+			o.Key = name + "|" + o.Kind + "|" + o.NodeID
+		}
+		obs = append(obs, o)
+	}
+	r.Tracker.Apply(obs, map[string]bool{name: true}, now)
 }
 
 // Run polls until ctx ends.
@@ -149,7 +178,7 @@ func (r *Runner) Run(ctx context.Context) {
 	if r.MeteredEvery <= 0 {
 		r.MeteredEvery = 5 * time.Minute
 	}
-	r.PollOnce(ctx)
+	r.launch(ctx)
 	t := time.NewTicker(r.Interval)
 	defer t.Stop()
 	for {
@@ -157,7 +186,7 @@ func (r *Runner) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			r.PollOnce(ctx)
+			r.launch(ctx)
 		}
 	}
 }
@@ -170,6 +199,7 @@ func (r *Runner) Snapshot() Snapshot {
 		notes = r.Notes()
 	}
 	var shown []Signal
+	chronic := map[string]*ChronicGroup{}
 	suppressed := 0
 	for _, s := range r.Tracker.Visible() {
 		if s.NodeID != "" {
@@ -179,6 +209,27 @@ func (r *Runner) Snapshot() Snapshot {
 					continue
 				}
 			}
+		}
+		if s.chronic(now) {
+			g := chronic[s.Kind]
+			if g == nil {
+				g = &ChronicGroup{Kind: s.Kind}
+				chronic[s.Kind] = g
+			}
+			name := s.NodeID
+			if n, ok := r.Graph.Node(s.NodeID); ok && n.Name != "" {
+				name = n.Name
+			}
+			if name == "" {
+				name = s.Title
+			}
+			detail := ""
+			if len(s.Evidence) > 0 {
+				detail = s.Evidence[0]
+			}
+			g.Count++
+			g.Items = append(g.Items, ChronicItem{Name: name, Title: s.Title, Since: s.Since, Detail: detail})
+			continue
 		}
 		shown = append(shown, s)
 	}
@@ -196,6 +247,12 @@ func (r *Runner) Snapshot() Snapshot {
 	if snap.Incidents == nil {
 		snap.Incidents = []Incident{}
 	}
+	snap.Chronic = []ChronicGroup{}
+	for _, g := range chronic {
+		sort.SliceStable(g.Items, func(i, j int) bool { return g.Items[i].Name < g.Items[j].Name })
+		snap.Chronic = append(snap.Chronic, *g)
+	}
+	sort.Slice(snap.Chronic, func(i, j int) bool { return snap.Chronic[i].Count > snap.Chronic[j].Count })
 	if r.Budget != nil {
 		snap.Budget = r.Budget.Status(now)
 	}
