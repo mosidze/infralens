@@ -16,9 +16,9 @@ conditional suggestions**, not verdicts: it does not know your plans.
 ./infralens audit --profile prod --client "ACME" --out acme/   # client-ready pack
 ```
 
-![The map: resources grouped by VPC, sized and priced from the bill](docs/img/map.png)
+![InfraLens: the map, then the Problem Monitor raising and clearing incidents (synthetic example data)](docs/img/demo.gif)
 
-> **Status: 0.1, early.** It has been exercised on one real production
+> **Status: 0.2, early.** It has been exercised on one real production
 > account and on synthetic data, not on a wide range of accounts. Expect false
 > positives on setups it has not seen, and please [report them](../../issues):
 > every one of them becomes a regression test. Read-only access is enforced in
@@ -49,17 +49,20 @@ All screenshots are of the built-in synthetic example (`infralens demo`).
 
 A screen for a second monitor that shows **only what is wrong, right now**:
 nothing healthy is drawn, so an empty screen means quiet. Open it from the app
-(`Problem Monitor`) or at `/live`; `infralens serve --monitor PROFILE` starts it
+(the `Problems` tab, with a count badge visible from every tab) or at `/live` for a second screen; `infralens serve --monitor PROFILE` starts it
 at once, and `--demo-live` shows scripted example problems without AWS.
 
-![Problem Monitor: incidents with the metric that caused them, what changed, and what is connected](docs/img/monitor.png)
+![Problems tab: incidents with the metric that caused them, what changed, and what is connected](docs/img/problems.png)
 
 It asks AWS cheap, read-only questions every 30-60 seconds: CloudWatch alarms
 in ALARM, ECS services below their desired count or with a failed deployment
 (with why tasks stopped), unhealthy load-balancer targets, RDS/Aurora in a
 broken state, dead-letter queues that are not empty, and open AWS Health
 issues. A problem has to persist for a few polls before it is shown, and it
-needs a few clean polls to clear, so it does not flicker. Problems that touch
+needs a few clean polls to clear, so it does not flicker. Alarms that only
+drive Auto Scaling are ignored (on a busy account they outnumber real alarms a
+hundred to one), and problems that have stood for days, or dead-letter queues
+that are not growing, are listed under "standing" instead of drawn as fires. Problems that touch
 each other are grouped into one incident, with what they are connected to
 (from your last scan), the owner and the cost.
 
@@ -303,6 +306,32 @@ a regression test.
 
 See `SECURITY.md` for what the tool does and does not do, and how to report a
 problem.
+
+## How this was built
+
+InfraLens was written with an AI coding assistant under close human direction:
+about 17,500 lines of Go, 6,300 lines of tests (209 test functions; coverage
+runs from about 55% to 100% per package, not 100% everywhere) and about 2,900
+lines of JS/HTML/CSS. It is validated on one real production account plus
+synthetic data. Treat it the way you would any young tool.
+
+What the assistant got wrong along the way, and the tests that now catch it
+(this is the part worth reading if you wonder how far to trust AI-written
+systems code):
+
+* It tuned detectors to fit the author's own account instead of to general
+  behaviour. The author spotted it; the estate is now only a regression check.
+* A join with Terraform state silently overwrote the confidence of a waste
+  verdict. A regression test pins it.
+* The "anonymised" audit leaked an account number through a note about Terraform
+  state, found only by grepping a real output. A test plants identifiers and
+  checks they never appear.
+* The first live run of the Problem Monitor showed 161 "problems", nearly all
+  Auto Scaling housekeeping. It is now recognised and ignored, with tests.
+
+Read-only access is not left to the model's good behaviour: every SDK call
+passes a guard that refuses anything but Describe/List/Get, and a test keeps
+the list of permissions in step with the code.
 
 ## Licence
 
