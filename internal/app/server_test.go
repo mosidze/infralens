@@ -466,3 +466,19 @@ func TestMonitorStartStopThroughTheApiAndOnlyOneAtATime(t *testing.T) {
 		t.Fatalf("no header: %d", r.StatusCode)
 	}
 }
+
+func TestLiveScreenMayBeFramedByTheAppButNothingElseMayBe(t *testing.T) {
+	base := t.TempDir()
+	s, _ := New(Config{Base: base, Store: settings.NewStore(base), Token: "tok", Live: fakeLive{}})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	s.SetAllowedHosts(strings.TrimPrefix(ts.URL, "http://"))
+	live := do(t, ts, "GET", "/live", "", nil).Header.Get("Content-Security-Policy")
+	if !strings.Contains(live, "frame-ancestors 'self'") {
+		t.Fatalf("the app must be able to show /live: %q", live)
+	}
+	idx := do(t, ts, "GET", "/", "", nil).Header.Get("Content-Security-Policy")
+	if !strings.Contains(idx, "frame-ancestors 'none'") {
+		t.Fatalf("the app itself must not be framed: %q", idx)
+	}
+}

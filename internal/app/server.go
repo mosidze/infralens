@@ -254,6 +254,9 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		// its own policy and may not talk to the network at all.
 		if strings.HasSuffix(r.URL.Path, "/report") || strings.HasPrefix(r.URL.Path, "/out/") || strings.HasPrefix(r.URL.Path, "/ai/") {
 			h.Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'")
+		} else if r.URL.Path == "/live" {
+			// the screen is shown on its own and inside the app
+			h.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'")
 		} else {
 			h.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 		}

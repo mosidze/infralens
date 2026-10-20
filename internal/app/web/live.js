@@ -7,7 +7,9 @@ const el = (tag, cls, text) => {
   return e;
 };
 const SVG = 'http://www.w3.org/2000/svg';
-if (new URLSearchParams(location.search).has('kiosk')) document.body.classList.add('kiosk');
+const qs = new URLSearchParams(location.search);
+if (qs.has('kiosk')) document.body.classList.add('kiosk');
+if (qs.has('embed')) document.body.classList.add('embed');
 
 const ago = (ms) => {
   const s = Math.max(0, Math.round(ms / 1000));

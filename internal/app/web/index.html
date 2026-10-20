@@ -13,11 +13,11 @@
   <nav id="nav">
     <button data-tab="scan" class="on">Scan</button>
     <button data-tab="map">Map</button>
+    <button data-tab="problems" title="Shows only what is wrong right now">Problems <span id="pbadge" class="badge" hidden></span></button>
     <button data-tab="reports">Reports</button>
     <button data-tab="ai">AI analysis</button>
     <button data-tab="notes">Owner notes</button>
     <button data-tab="settings">Settings</button>
-    <a href="/live" target="_blank" rel="noopener" class="navlink" title="A live screen that shows only what is wrong; made for a second monitor">Problem Monitor</a>
   </nav>
 </header>
 <main>
@@ -51,6 +51,14 @@
       <span class="muted" id="map-empty" hidden>No scan yet — run one on the Scan tab.</span>
     </div>
     <iframe id="mapframe" title="Map" referrerpolicy="no-referrer"></iframe>
+  </section>
+
+  <section id="tab-problems" hidden>
+    <div class="maphead">
+      <span class="muted">Only what is wrong right now. Nothing healthy is drawn.</span>
+      <a id="prob-new" href="/live" target="_blank" rel="noopener" class="muted">open in its own window (for a second screen)</a>
+    </div>
+    <iframe id="probframe" title="Problem Monitor" referrerpolicy="no-referrer"></iframe>
   </section>
 
   <section id="tab-reports" hidden>

@@ -23,9 +23,10 @@ let chosen = '';
 // ---- tabs -------------------------------------------------------------------
 document.querySelectorAll('#nav button').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));
 function show(tab) {
-  document.querySelector('main').classList.toggle('wide', tab === 'map');
+  document.querySelector('main').classList.toggle('wide', tab === 'map' || tab === 'problems');
   document.querySelectorAll('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   if (tab === 'map') loadMap();
+  if (tab === 'problems' && !$('probframe').getAttribute('src')) $('probframe').src = '/live?embed=1';
   document.querySelectorAll('main > section').forEach((s) => { s.hidden = s.id !== 'tab-' + tab; });
 }
 
@@ -212,7 +213,7 @@ $('s-test').addEventListener('click', async () => {
 
 (async () => {
   const t = location.hash.slice(1);
-  if (['scan', 'map', 'reports', 'ai', 'notes', 'settings'].includes(t)) show(t);
+  if (['scan', 'map', 'problems', 'reports', 'ai', 'notes', 'settings'].includes(t)) show(t);
   await refresh(); await loadNotes();
   try { fillSettings((await api('GET', '/api/settings'))); } catch (e) { /* ignore */ }
 })();
@@ -325,3 +326,21 @@ window.addEventListener('message', async (ev) => {
     reply({answer: j.answer, findings: j.findings, model: j.model, removed: j.removed, based_on: j.based_on});
   } catch (e) { reply({error: String(e.message || e)}); }
 });
+
+// ---- problem badge ------------------------------------------------------------
+// The count stays visible from every tab, so a problem is not missed while
+// looking at something else. Nothing is shown when nothing is wrong.
+async function pollBadge() {
+  const b = $('pbadge');
+  try {
+    const r = await fetch('/api/live/state', {headers: {'X-Infralens': '1'}});
+    if (!r.ok) { b.hidden = true; return; }
+    const s = await r.json();
+    const n = (s.crit || 0) + (s.warn || 0);
+    if (n) { b.hidden = false; b.className = 'badge ' + (s.crit ? 'crit' : 'warn'); b.textContent = String(n); }
+    else if ((s.blind || []).length) { b.hidden = false; b.className = 'badge blind'; b.textContent = '!'; b.title = 'The monitor cannot see everything'; }
+    else b.hidden = true;
+  } catch (e) { b.hidden = true; }
+}
+setInterval(pollBadge, 5000);
+pollBadge();
