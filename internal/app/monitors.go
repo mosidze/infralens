@@ -252,11 +252,9 @@ func (s *Server) Watch(ctx context.Context, sp MonitorSpec) error {
 		}
 		s.mons.remove(sp.ID())
 	}
+	// a monitor that cannot start keeps its tab, which says why; the caller
+	// decides whether that is fatal
 	err := s.startOne(ctx, sp)
-	if err != nil {
-		s.mons.remove(sp.ID())
-		return err
-	}
 	s.saveMonitors()
-	return nil
+	return err
 }

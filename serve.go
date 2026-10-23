@@ -78,8 +78,8 @@ func runServe(args []string) int {
 	srv.RestoreMonitors(ctx)
 	if *monitor != "" {
 		if err := srv.Watch(ctx, app.MonitorSpec{Kind: "aws", Name: *monitor}); err != nil {
-			fmt.Fprintln(os.Stderr, "error:", err)
-			return exitError
+			// serve anyway: the tab shows the reason and can be retried
+			fmt.Fprintln(os.Stderr, "warning:", err)
 		}
 	}
 	url := fmt.Sprintf("http://%s/?t=%s", ln.Addr(), srv.Token())
