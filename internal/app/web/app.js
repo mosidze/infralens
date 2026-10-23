@@ -92,8 +92,9 @@ function renderJob(j) {
         w.addEventListener('click', async () => {
           w.disabled = true;
           try {
-            await api('POST', '/api/live/stop', {});
-            await api('POST', '/api/live/start', {profile: s.profile});
+            try { await api('POST', '/api/live/start', {kind: 'aws', name: s.profile}); }
+            catch (e) { if (e.message.indexOf('already') < 0) throw e; } // already watched: just show it
+            try { sessionStorage.setItem('il-mon', 'aws:' + s.profile); } catch (e) { /* private mode */ }
             $('probframe').removeAttribute('src');
             show('problems');
           } catch (e) { w.disabled = false; done.append(el('p', {className: 'err', textContent: e.message})); }
@@ -346,12 +347,12 @@ window.addEventListener('message', async (ev) => {
 async function pollBadge() {
   const b = $('pbadge');
   try {
-    const r = await fetch('/api/live/state', {headers: {'X-Infralens': '1'}});
+    const r = await fetch('/api/live/monitors', {headers: {'X-Infralens': '1'}});
     if (!r.ok) { b.hidden = true; return; }
-    const s = await r.json();
-    const n = (s.crit || 0) + (s.warn || 0);
-    if (n) { b.hidden = false; b.className = 'badge ' + (s.crit ? 'crit' : 'warn'); b.textContent = String(n); }
-    else if ((s.blind || []).length) { b.hidden = false; b.className = 'badge blind'; b.textContent = '!'; b.title = 'The monitor cannot see everything'; }
+    const ms = (await r.json()).monitors || [];
+    const crit = ms.reduce((a, m) => a + m.crit, 0), warn = ms.reduce((a, m) => a + m.warn, 0);
+    if (crit + warn) { b.hidden = false; b.className = 'badge ' + (crit ? 'crit' : 'warn'); b.textContent = String(crit + warn); b.title = ''; }
+    else if (ms.some((m) => m.blind)) { b.hidden = false; b.className = 'badge blind'; b.textContent = '!'; b.title = 'A monitor cannot see everything'; }
     else b.hidden = true;
   } catch (e) { b.hidden = true; }
 }

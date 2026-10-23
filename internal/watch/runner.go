@@ -44,6 +44,7 @@ type Runner struct {
 	Notes        func() engine.Context
 	Account      string
 	Profile      string
+	Kind         string // aws | k8s, shown on the screen
 	Demo         bool
 	Now          func() time.Time
 	// Stats reports API calls made and blocked, for the screen's footer.
@@ -234,7 +235,7 @@ func (r *Runner) Snapshot() Snapshot {
 		shown = append(shown, s)
 	}
 	inc := buildIncidents(shown, r.Graph)
-	snap := Snapshot{Now: now, Account: r.Account, Profile: r.Profile, Demo: r.Demo, Incidents: inc, Suppressed: suppressed}
+	snap := Snapshot{Now: now, Account: r.Account, Profile: r.Profile, Kind: r.Kind, Demo: r.Demo, Incidents: inc, Suppressed: suppressed}
 	for _, in := range inc {
 		for _, n := range in.Nodes {
 			if n.Signals[0].Severity == SevCrit {

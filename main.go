@@ -23,6 +23,7 @@ import (
 	"infralens/internal/engine"
 	"infralens/internal/history"
 	"infralens/internal/importer"
+	"infralens/internal/k8swatch"
 	"infralens/internal/llm"
 	"infralens/internal/report"
 	"infralens/internal/settings"
@@ -879,8 +880,14 @@ func runPolicy(args []string) int {
 	skip := fs.String("skip", "", "leave out these checks")
 	noBlast := fs.Bool("no-blast", false, "leave out dependency lookups (Route53, CloudFront, route tables)")
 	withWatch := fs.Bool("watch", false, "also include what the live Problem Monitor needs")
+	k8s := fs.Bool("k8s", false, "print the read-only Kubernetes ClusterRole the Problem Monitor needs, instead of an AWS policy")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
+	}
+	if *k8s {
+		fmt.Print(k8swatch.RBAC)
+		fmt.Fprintln(os.Stderr, "[i] get/list/watch only; no access to Secrets or ConfigMaps. Bind it with: kubectl create clusterrolebinding infralens-readonly --clusterrole=infralens-readonly --user=NAME")
+		return exitOK
 	}
 	sel, err := awsDiscovery.SelectScanners(splitCSV(*services), splitCSV(*skip))
 	if err != nil {

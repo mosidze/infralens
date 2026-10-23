@@ -126,39 +126,11 @@ function renderChronic(groups) {
 }
 $('chronicBtn').addEventListener('click', () => { chronicOpen = !chronicOpen; if (last) renderChronic(last.chronic || []); });
 
-// The account being watched is shown and can be changed here. Scanning an
-// account does not move the monitor: it keeps watching what it was told to.
-let watchable = [], watchableAt = 0, watching = '';
-async function refreshWho(snap) {
-  const who = $('who');
-  if (snap.demo || !snap.profile) { who.hidden = true; return; }
-  watching = snap.profile;
-  if (Date.now() - watchableAt > 30000) {
-    watchableAt = Date.now();
-    try { watchable = [...new Set(((await api('GET', '/api/state')).scans || []).map((s) => s.profile).filter(Boolean))]; } catch (e) { /* keep the old list */ }
-  }
-  const list = watchable.includes(snap.profile) ? watchable : [snap.profile, ...watchable];
-  who.textContent = '';
-  list.forEach((p) => who.append(new Option(p === snap.profile && snap.account ? p + ' · ' + snap.account : p, p)));
-  who.value = snap.profile;
-  who.hidden = false;
-}
-$('who').addEventListener('change', async () => {
-  const to = $('who').value;
-  if (to === watching) return;
-  if (!confirm('Stop watching ' + watching + ' and watch ' + to + '?\n\n' + to + ' must have been scanned once.')) { $('who').value = watching; return; }
-  try {
-    await api('POST', '/api/live/stop', {});
-    await api('POST', '/api/live/start', { profile: to });
-    watchableAt = 0; poll();
-  } catch (e) { showStart(e.message); }
-});
-
 let last = null;
 function render(snap) {
   last = snap;
-  refreshWho(snap);
   $('demo').hidden = !snap.demo;
+  $('kindtag').textContent = snap.kind === 'k8s' ? 'Kubernetes' : snap.kind === 'aws' ? 'AWS' : '';
   const counts = $('counts'); counts.textContent = '';
   if (snap.crit) counts.append(el('span', 'cnt crit', snap.crit + ' critical'));
   if (snap.warn) counts.append(el('span', 'cnt warn', snap.warn + ' warning'));
@@ -214,44 +186,129 @@ const api = async (method, path, body) => {
   return j;
 };
 
-let stopped = true;
-async function showStart(note) {
-  last = null; stopped = true;
-  $('stop').hidden = true; $('chronicBtn').hidden = true; $('chronic').hidden = true; $('counts').textContent = ''; $('meta').textContent = ''; $('blind').hidden = true;
+// ---- monitors are tabs ------------------------------------------------------
+let monitors = [], selected = sessionStorage.getItem('il-mon') || '', adding = false, startShown = false;
+
+function badge(m) {
+  if (m.crit) return el('span', 'tb crit', String(m.crit + m.warn));
+  if (m.warn) return el('span', 'tb warn', String(m.warn));
+  if (m.blind) return el('span', 'tb blind', '!');
+  return null;
+}
+
+function renderTabs() {
+  const t = $('tabs'); t.textContent = '';
+  monitors.forEach((m) => {
+    const b = el('button', 'tab' + (!adding && m.id === selected ? ' on' : ''));
+    b.append(el('span', 'k', m.kind === 'k8s' ? 'K8s' : m.kind === 'aws' ? 'AWS' : m.kind), el('span', null, ' ' + m.name));
+    const bd = badge(m); if (bd) b.append(bd);
+    b.addEventListener('click', () => { selected = m.id; adding = false; startShown = false; sessionStorage.setItem('il-mon', selected); poll(); });
+    t.append(b);
+  });
+  const plus = el('button', 'tab plus' + (adding ? ' on' : ''), '+');
+  plus.title = 'Watch another AWS account or Kubernetes cluster';
+  plus.addEventListener('click', () => { adding = true; startShown = false; poll(); });
+  t.append(plus);
+}
+
+function clearBoardChrome() {
+  last = null;
+  $('stop').hidden = true; $('chronicBtn').hidden = true; $('chronic').hidden = true;
+  $('counts').textContent = ''; $('meta').textContent = ''; $('blind').hidden = true; $('kindtag').textContent = '';
   document.title = 'Problem Monitor Live';
+}
+
+async function showStart(note) {
+  clearBoardChrome();
+  startShown = true;
   let profiles = [];
-  try { profiles = (await api('GET', '/api/state')).profiles || []; } catch (e) { /* none */ }
+  try {
+    const st = await api('GET', '/api/state');
+    const scanned = new Set((st.scans || []).map((s) => s.profile).filter(Boolean));
+    profiles = (st.profiles || []).filter((p) => scanned.has(p));
+  } catch (e) { /* none */ }
   const board = $('board'); board.textContent = '';
   const box = el('div', 'start');
-  box.append(el('h2', null, 'Not watching yet'), el('p', null, 'Choose an account. It must have been scanned once: the scan is the map this screen works from.'));
-  const row = el('div', 'row');
-  const sel = el('select');
-  profiles.forEach((p) => sel.append(new Option(p, p)));
-  const go = el('button', 'go', 'Start watching');
-  row.append(sel, go);
-  box.append(row);
-  const err = el('div', 'err'); if (note) err.textContent = note;
-  box.append(err);
-  go.addEventListener('click', async () => {
-    go.disabled = true; err.textContent = '';
-    try { await api('POST', '/api/live/start', { profile: sel.value }); stopped = false; poll(); }
-    catch (e) { err.textContent = e.message; go.disabled = false; }
-  });
+  box.append(el('h2', null, monitors.length ? 'Watch something else' : 'Not watching anything yet'));
+  const kinds = el('div', 'kinds');
+  const bAws = el('button', 'kind on', 'AWS account'), bK8s = el('button', 'kind', 'Kubernetes cluster');
+  kinds.append(bAws, bK8s);
+  const body = el('div'); const err = el('div', 'err'); if (note) err.textContent = note;
+  box.append(kinds, body, err);
+
+  const awsForm = () => {
+    body.textContent = '';
+    body.append(el('p', null, 'The account must have been scanned once: the scan is the map this screen works from.'));
+    const row = el('div', 'row');
+    const sel = el('select'); profiles.forEach((p) => sel.append(new Option(p, p)));
+    const go = el('button', 'go', 'Start watching');
+    if (!profiles.length) { go.disabled = true; body.append(el('p', 'kind', 'No scanned profile yet. Scan one on the Scan tab first.')); }
+    row.append(sel, go); body.append(row);
+    go.addEventListener('click', () => start(go, { kind: 'aws', name: sel.value }));
+  };
+  const k8sForm = () => {
+    body.textContent = '';
+    body.append(el('p', null, 'Read-only: only GET requests are ever sent to the cluster. Leave the path empty to use your default kubeconfig.'));
+    const path = el('input'); path.placeholder = 'kubeconfig file (optional), e.g. ~/.kube/prod.yaml';
+    const load = el('button', null, 'Read contexts');
+    const row1 = el('div', 'row'); row1.append(path, load);
+    const sel = el('select'); sel.hidden = true;
+    const go = el('button', 'go', 'Start watching'); go.hidden = true;
+    const row2 = el('div', 'row'); row2.append(sel, go);
+    body.append(row1, row2);
+    const read = async () => {
+      err.textContent = '';
+      try {
+        const r = await api('GET', '/api/k8s/contexts' + (path.value.trim() ? '?kubeconfig=' + encodeURIComponent(path.value.trim()) : ''));
+        sel.textContent = ''; (r.contexts || []).forEach((c) => sel.append(new Option(c, c)));
+        sel.hidden = go.hidden = !(r.contexts || []).length;
+        if (!(r.contexts || []).length) err.textContent = 'No contexts found in that kubeconfig.';
+      } catch (e) { err.textContent = e.message; sel.hidden = go.hidden = true; }
+    };
+    load.addEventListener('click', read);
+    go.addEventListener('click', () => start(go, { kind: 'k8s', name: sel.value, kubeconfig: path.value.trim() }));
+    read();
+  };
+  const start = async (btn, spec) => {
+    btn.disabled = true; err.textContent = '';
+    try {
+      const r = await api('POST', '/api/live/start', spec);
+      selected = r.id; adding = false; startShown = false; sessionStorage.setItem('il-mon', selected);
+      poll();
+    } catch (e) { err.textContent = e.message; btn.disabled = false; }
+  };
+  bAws.addEventListener('click', () => { bAws.classList.add('on'); bK8s.classList.remove('on'); awsForm(); });
+  bK8s.addEventListener('click', () => { bK8s.classList.add('on'); bAws.classList.remove('on'); k8sForm(); });
+  awsForm();
   board.append(box);
 }
 
 async function poll() {
   try {
-    const snap = await api('GET', '/api/live/state');
-    if (stopped) { stopped = false; }
+    monitors = (await api('GET', '/api/live/monitors')).monitors || [];
+  } catch (e) {
+    const blind = $('blind'); blind.hidden = false; blind.textContent = 'Lost contact with InfraLens: ' + e.message;
+    return;
+  }
+  if (!monitors.length) adding = true;
+  if (!adding && !monitors.some((m) => m.id === selected)) selected = monitors[0].id;
+  renderTabs();
+  if (adding) { if (!startShown) showStart(); return; }
+  try {
+    const snap = await api('GET', '/api/live/state?id=' + encodeURIComponent(selected));
     $('stop').hidden = false;
     render(snap);
   } catch (e) {
-    if (e.status === 404) { if (!stopped || !document.querySelector('.start')) showStart(); return; }
+    if (e.status === 404) { selected = ''; return; }
     const blind = $('blind'); blind.hidden = false; blind.textContent = 'Lost contact with InfraLens: ' + e.message;
   }
 }
-$('stop').addEventListener('click', async () => { await api('POST', '/api/live/stop', {}); showStart(); });
+$('stop').addEventListener('click', async () => {
+  const m = monitors.find((x) => x.id === selected);
+  if (!m || !confirm('Stop watching ' + m.name + '?')) return;
+  await api('POST', '/api/live/stop', { id: m.id });
+  selected = ''; poll();
+});
 
 $('fs').addEventListener('click', () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()));
 document.addEventListener('keydown', (e) => {

@@ -60,14 +60,6 @@ func runServe(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	var live app.LiveSource
-	if *monitor != "" {
-		src, err := monitorHook(base, *apiLog)(ctx, *monitor)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error:", err)
-			return exitError
-		}
-		live = src
-	}
 	if *demoLive {
 		r := demoMonitor()
 		go r.Run(ctx)
@@ -77,11 +69,18 @@ func runServe(args []string) int {
 		Live:  live,
 		Token: token,
 		Base:  base, Store: settings.NewStore(base), Version: version,
-		Hooks: app.Hooks{Profiles: awsDiscovery.ListProfiles, Scan: scanHook(base), StartMonitor: monitorHook(base, *apiLog)},
+		Hooks: app.Hooks{Profiles: awsDiscovery.ListProfiles, Scan: scanHook(base), StartMonitor: monitorHook(base, *apiLog), K8sContexts: k8sContexts},
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return exitError
+	}
+	srv.RestoreMonitors(ctx)
+	if *monitor != "" {
+		if err := srv.Watch(ctx, app.MonitorSpec{Kind: "aws", Name: *monitor}); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return exitError
+		}
 	}
 	url := fmt.Sprintf("http://%s/?t=%s", ln.Addr(), srv.Token())
 	fmt.Println("InfraLens is running. Open this address once; the browser then remembers it:")

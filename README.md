@@ -78,6 +78,33 @@ each other are grouped into one incident, with what they are connected to
   "note": "failover drill", "until": "2026-11-01"}`.
 * `infralens policy --watch` prints the extra read-only permissions it needs.
 
+### Kubernetes
+
+The same screen watches Kubernetes clusters, one tab per cluster. Use the `+`
+tab, pick a context from your kubeconfig (or point at another kubeconfig file),
+and nothing has to be scanned first: the cluster is its own map.
+
+It judges **workloads, not pods**. A Deployment with all its replicas ready is
+healthy however many of its pods have restarted over the months; a pod appears
+only as evidence for the workload it belongs to. On a cluster with 500 pods that
+turns hundreds of rows into a few dozen things, and the rest into counts.
+
+What counts as a problem: replicas below wanted outside a rollout (with why:
+`ImagePullBackOff`, unschedulable, ...), restart loops and restarts *in the last
+hour* (not lifetime counters), OOM kills in the last six hours (one-off Jobs are
+bucketed per namespace instead of becoming a hundred "workloads"), nodes not
+ready or under pressure, control-plane quorum, Services with nothing ready
+behind them (critical when exposed through an Ingress or a load balancer), failed
+Jobs, pending volume claims and mount failures, and autoscalers that cannot
+scale. Policy-engine warnings, Completed pods and short rollout blips are not
+problems. Severity follows the namespace: cluster plumbing is always critical, a
+`-staging` or `-dev` namespace never is, and anything older than three days is
+listed under "standing".
+
+It is read-only by construction: the client refuses every request that is not a
+GET. `infralens policy --k8s` prints the matching read-only `ClusterRole` (no
+Secrets, no ConfigMaps).
+
 ## Install
 
 Download a binary for Linux or macOS from the [Releases page](../../releases)

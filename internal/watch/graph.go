@@ -3,6 +3,7 @@ package watch
 import (
 	"sort"
 	"strings"
+	"sync"
 
 	"infralens/internal/engine"
 )
@@ -10,13 +11,24 @@ import (
 // Graph is the part of a scan the live screen needs: what a resource is, who
 // owns it, what it costs and what it is connected to.
 type Graph struct {
+	mu     sync.RWMutex
 	nodes  map[string]engine.ResourceNode
 	byName map[string]string
 	adj    map[string][]string
 }
 
 func NewGraph(res engine.ScanResult) *Graph {
-	g := &Graph{nodes: map[string]engine.ResourceNode{}, byName: map[string]string{}, adj: map[string][]string{}}
+	g := &Graph{}
+	g.Reset(res)
+	return g
+}
+
+// Reset replaces what the graph knows. A Kubernetes monitor does this every
+// few minutes because workloads come and go; an AWS monitor never does.
+func (g *Graph) Reset(res engine.ScanResult) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.nodes, g.byName, g.adj = map[string]engine.ResourceNode{}, map[string]string{}, map[string][]string{}
 	for _, n := range res.Nodes {
 		g.nodes[n.ID] = n
 		if n.Name != "" {
@@ -35,10 +47,11 @@ func NewGraph(res engine.ScanResult) *Graph {
 		g.adj[e.Source] = append(g.adj[e.Source], e.Target)
 		g.adj[e.Target] = append(g.adj[e.Target], e.Source)
 	}
-	return g
 }
 
 func (g *Graph) Node(id string) (engine.ResourceNode, bool) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	n, ok := g.nodes[id]
 	return n, ok
 }
@@ -46,6 +59,8 @@ func (g *Graph) Node(id string) (engine.ResourceNode, bool) {
 // Resolve finds a node by id, ARN or name. Collectors know a resource by
 // whatever the API calls it.
 func (g *Graph) Resolve(ref string) (string, bool) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	if _, ok := g.nodes[ref]; ok {
 		return ref, true
 	}
@@ -65,6 +80,8 @@ func (g *Graph) Resolve(ref string) (string, bool) {
 // narrows to regions that hold at least one of them: there is no point asking
 // every region whether its ECS services are running when only one has any.
 func (g *Graph) Regions(nodeTypes ...string) []string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	want := map[string]bool{}
 	for _, t := range nodeTypes {
 		want[t] = true
@@ -87,14 +104,23 @@ func (g *Graph) Regions(nodeTypes ...string) []string {
 	return out
 }
 
-func (g *Graph) neighbors(id string) []string { return g.adj[id] }
+func (g *Graph) neighbors(id string) []string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return append([]string(nil), g.adj[id]...)
+}
 
-func kindOf(t string) string { return strings.ReplaceAll(strings.TrimPrefix(t, "aws_"), "_", " ") }
+func kindOf(t string) string {
+	t = strings.TrimPrefix(strings.TrimPrefix(t, "aws_"), "k8s_")
+	return strings.ReplaceAll(t, "_", " ")
+}
 
 // connected summarises the neighbours of a node by kind, never by name, and
 // says nothing about direction: the scan records that two things are
 // connected, not which one needs the other.
 func (g *Graph) connected(id string) (int, []string) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	count := map[string]int{}
 	seen := map[string]bool{}
 	for _, nb := range g.adj[id] {

@@ -426,44 +426,110 @@ func TestLiveScreenServesStateAndKeepsTheStrictPolicy(t *testing.T) {
 	}
 }
 
-func TestMonitorStartStopThroughTheApiAndOnlyOneAtATime(t *testing.T) {
-	started := ""
-	hooks := Hooks{StartMonitor: func(ctx context.Context, profile string) (LiveSource, error) {
-		if profile == "bad" {
+type namedLive struct{ crit, warn int }
+
+func (n namedLive) Snapshot() watch.Snapshot {
+	return watch.Snapshot{Crit: n.crit, Warn: n.warn, Incidents: []watch.Incident{}, Chronic: []watch.ChronicGroup{{Kind: "k", Count: 2}}, Collectors: []watch.CollectorStatus{}}
+}
+
+func TestSeveralMonitorsAreTabsStartedAndStoppedByIdentity(t *testing.T) {
+	started := map[string]bool{}
+	hooks := Hooks{StartMonitor: func(ctx context.Context, sp MonitorSpec) (LiveSource, error) {
+		if sp.Name == "bad" {
 			return nil, errors.New("no scan of \"bad\" yet")
 		}
-		started = profile
-		return fakeLive{}, nil
+		started[sp.ID()] = true
+		return namedLive{crit: 1}, nil
 	}}
-	_, ts, _ := newTestServer(t, hooks)
+	_, ts, base := newTestServer(t, hooks)
 
-	if r := do(t, ts, "POST", "/api/live/start", `{"profile":"a;rm -rf /"}`, nil); r.StatusCode != 400 {
-		t.Fatalf("odd profile: %d", r.StatusCode)
+	for _, bad := range []string{`{"kind":"aws","name":"a;rm -rf /"}`, `{"kind":"ftp","name":"x"}`, `{"kind":"k8s","name":"c","kubeconfig":"../../etc/passwd"}`} {
+		if r := do(t, ts, "POST", "/api/live/start", bad, nil); r.StatusCode != 400 {
+			t.Fatalf("%s accepted: %d", bad, r.StatusCode)
+		}
 	}
-	if r := do(t, ts, "POST", "/api/live/start", `{"profile":"bad"}`, nil); r.StatusCode != 400 {
+	if r := do(t, ts, "POST", "/api/live/start", `{"kind":"aws","name":"bad"}`, nil); r.StatusCode != 400 {
 		t.Fatalf("hook error must reach the user: %d", r.StatusCode)
 	}
 	if r := do(t, ts, "GET", "/api/live/state", "", nil); r.StatusCode != 404 {
-		t.Fatalf("not started yet: %d", r.StatusCode)
+		t.Fatalf("nothing started yet: %d", r.StatusCode)
 	}
-	if r := do(t, ts, "POST", "/api/live/start", `{"profile":"prod"}`, nil); r.StatusCode != 202 || started != "prod" {
-		t.Fatalf("start: %d %q", r.StatusCode, started)
+	if r := do(t, ts, "POST", "/api/live/start", `{"kind":"aws","name":"prod"}`, nil); r.StatusCode != 202 || !started["aws:prod"] {
+		t.Fatalf("aws start: %d", r.StatusCode)
 	}
-	if r := do(t, ts, "POST", "/api/live/start", `{"profile":"prod"}`, nil); r.StatusCode != 409 {
-		t.Fatalf("second start: %d", r.StatusCode)
+	if r := do(t, ts, "POST", "/api/live/start", `{"kind":"k8s","name":"prod"}`, nil); r.StatusCode != 202 || !started["k8s:prod"] {
+		t.Fatalf("a cluster and a profile with the same name are different monitors: %d", r.StatusCode)
 	}
-	if r := do(t, ts, "GET", "/api/live/state", "", nil); r.StatusCode != 200 {
-		t.Fatalf("running: %d", r.StatusCode)
+	if r := do(t, ts, "POST", "/api/live/start", `{"kind":"aws","name":"prod"}`, nil); r.StatusCode != 409 {
+		t.Fatalf("the same thing twice: %d", r.StatusCode)
 	}
-	if r := do(t, ts, "POST", "/api/live/stop", `{}`, nil); r.StatusCode != 200 {
-		t.Fatalf("stop: %d", r.StatusCode)
+	if r := do(t, ts, "POST", "/api/live/start", `{"profile":"legacy"}`, nil); r.StatusCode != 202 || !started["aws:legacy"] {
+		t.Fatalf("older clients send a profile: %d", r.StatusCode)
 	}
-	if r := do(t, ts, "GET", "/api/live/state", "", nil); r.StatusCode != 404 {
-		t.Fatalf("after stop: %d", r.StatusCode)
+
+	r := do(t, ts, "GET", "/api/live/monitors", "", nil)
+	var list struct {
+		Monitors []monitorView `json:"monitors"`
 	}
-	// writes need the custom header like every other write
-	if r := do(t, ts, "POST", "/api/live/start", `{"profile":"prod"}`, func(r *http.Request) { r.Header.Del("X-Infralens") }); r.StatusCode != 403 {
-		t.Fatalf("no header: %d", r.StatusCode)
+	_ = json.NewDecoder(r.Body).Decode(&list)
+	if len(list.Monitors) != 3 || list.Monitors[0].ID != "aws:prod" || list.Monitors[0].Crit != 1 || list.Monitors[0].Standing != 2 {
+		t.Fatalf("monitors: %+v", list.Monitors)
+	}
+	if x := do(t, ts, "GET", "/api/live/state?id=k8s:prod", "", nil); x.StatusCode != 200 {
+		t.Fatalf("state by id: %d", x.StatusCode)
+	}
+	if x := do(t, ts, "GET", "/api/live/state?id=aws:nope", "", nil); x.StatusCode != 404 {
+		t.Fatalf("unknown id: %d", x.StatusCode)
+	}
+
+	// the tabs survive a restart
+	saved, _ := os.ReadFile(filepath.Join(base, "monitors.json"))
+	if !strings.Contains(string(saved), `"k8s"`) || !strings.Contains(string(saved), `"prod"`) {
+		t.Fatalf("monitors.json: %s", saved)
+	}
+
+	if x := do(t, ts, "POST", "/api/live/stop", `{"id":"k8s:prod"}`, nil); x.StatusCode != 200 {
+		t.Fatalf("stop: %d", x.StatusCode)
+	}
+	if x := do(t, ts, "GET", "/api/live/state?id=k8s:prod", "", nil); x.StatusCode != 404 {
+		t.Fatalf("after stop: %d", x.StatusCode)
+	}
+	if x := do(t, ts, "GET", "/api/live/state?id=aws:prod", "", nil); x.StatusCode != 200 {
+		t.Fatalf("the other tab must keep running: %d", x.StatusCode)
+	}
+	if x := do(t, ts, "POST", "/api/live/start", `{"kind":"aws","name":"x"}`, func(r *http.Request) { r.Header.Del("X-Infralens") }); x.StatusCode != 403 {
+		t.Fatalf("no header: %d", x.StatusCode)
+	}
+}
+
+func TestRestoredMonitorsKeepTheirTabEvenWhenTheyCannotStart(t *testing.T) {
+	base := t.TempDir()
+	_ = os.WriteFile(filepath.Join(base, "monitors.json"), []byte(`[{"kind":"aws","name":"ok"},{"kind":"k8s","name":"gone"}]`), 0o600)
+	hooks := Hooks{StartMonitor: func(ctx context.Context, sp MonitorSpec) (LiveSource, error) {
+		if sp.Name == "gone" {
+			return nil, errors.New("the cluster does not answer")
+		}
+		return namedLive{}, nil
+	}}
+	s, err := New(Config{Base: base, Store: settings.NewStore(base), Token: "tok", Hooks: hooks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.RestoreMonitors(context.Background())
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	s.SetAllowedHosts(strings.TrimPrefix(ts.URL, "http://"))
+	r := do(t, ts, "GET", "/api/live/state?id=k8s:gone", "", nil)
+	var snap watch.Snapshot
+	_ = json.NewDecoder(r.Body).Decode(&snap)
+	if r.StatusCode != 200 || len(snap.Blind) != 1 || !strings.Contains(snap.Blind[0], "does not answer") {
+		t.Fatalf("a monitor that cannot start must say why, not vanish: %d %+v", r.StatusCode, snap)
+	}
+	// and it can be retried
+	hooks2 := hooks
+	_ = hooks2
+	if x := do(t, ts, "POST", "/api/live/start", `{"kind":"k8s","name":"gone"}`, nil); x.StatusCode != 400 {
+		t.Fatalf("retry reports the error to the caller: %d", x.StatusCode)
 	}
 }
 

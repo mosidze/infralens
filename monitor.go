@@ -23,8 +23,20 @@ const monitorDailyBudget = 0.50
 // monitorHook starts the Problem Monitor for a profile. It learns what exists
 // from the profile's latest scan, so it does not have to rediscover the
 // account, and it asks AWS only the cheap "what is wrong" questions.
-func monitorHook(base, apiLogPath string) func(context.Context, string) (app.LiveSource, error) {
-	return func(ctx context.Context, profile string) (app.LiveSource, error) {
+func monitorHook(base, apiLogPath string) func(context.Context, app.MonitorSpec) (app.LiveSource, error) {
+	return func(ctx context.Context, spec app.MonitorSpec) (app.LiveSource, error) {
+		switch spec.Kind {
+		case "aws":
+			return startAWSMonitor(ctx, base, apiLogPath, spec.Name)
+		case "k8s":
+			return startK8sMonitor(ctx, base, spec)
+		}
+		return nil, fmt.Errorf("unknown monitor kind %q", spec.Kind)
+	}
+}
+
+func startAWSMonitor(ctx context.Context, base, apiLogPath, profile string) (app.LiveSource, error) {
+	{
 		_, res, err := history.LatestForProfile(base, profile)
 		if err != nil {
 			return nil, fmt.Errorf("no scan of %q yet: run one first (the monitor uses it as its map)", profile)

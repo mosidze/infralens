@@ -67,8 +67,10 @@ type ScanRequest struct {
 type Hooks struct {
 	// StartMonitor begins watching a profile and returns the source for the
 	// Problem Monitor screen. It runs until ctx ends.
-	StartMonitor func(ctx context.Context, profile string) (LiveSource, error)
-	Profiles     func() ([]string, error)
+	StartMonitor func(ctx context.Context, spec MonitorSpec) (LiveSource, error)
+	// K8sContexts lists the contexts in a kubeconfig (the default one when empty).
+	K8sContexts func(kubeconfig string) ([]string, error)
+	Profiles    func() ([]string, error)
 	// Scan runs one scan and returns the path of the saved history file.
 	Scan func(ctx context.Context, r ScanRequest, contextFile string, progress func(string)) (string, error)
 }
@@ -89,13 +91,11 @@ type Config struct {
 }
 
 type Server struct {
-	cfg        Config
-	mu         sync.Mutex
-	live       LiveSource
-	liveCancel context.CancelFunc
-	liveName   string
-	job        *job
-	host       map[string]bool // allowed Host header values, set by Listen
+	cfg  Config
+	mu   sync.Mutex
+	mons *monitorSet
+	job  *job
+	host map[string]bool // allowed Host header values, set by Listen
 }
 
 type job struct {
@@ -120,7 +120,11 @@ func New(cfg Config) (*Server, error) {
 	if cfg.Base == "" || cfg.Store == nil {
 		return nil, errors.New("app: Base and Store are required")
 	}
-	return &Server{cfg: cfg, host: map[string]bool{}, live: cfg.Live}, nil
+	srv := &Server{cfg: cfg, host: map[string]bool{}, mons: &monitorSet{}}
+	if cfg.Live != nil {
+		srv.mons.add(&monitor{Spec: MonitorSpec{Kind: "demo", Name: "demo"}, Src: cfg.Live})
+	}
+	return srv, nil
 }
 
 func (s *Server) Token() string { return s.cfg.Token }
@@ -185,9 +189,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /live", s.page(liveHTML, "text/html; charset=utf-8"))
 	mux.HandleFunc("GET /static/live.js", s.page(liveJS, "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /static/live.css", s.page(liveCSS, "text/css; charset=utf-8"))
+	mux.HandleFunc("GET /api/live/monitors", s.liveMonitors)
 	mux.HandleFunc("GET /api/live/state", s.liveState)
 	mux.HandleFunc("POST /api/live/start", s.liveStart)
 	mux.HandleFunc("POST /api/live/stop", s.liveStop)
+	mux.HandleFunc("GET /api/k8s/contexts", s.k8sContexts)
 	mux.HandleFunc("GET /api/state", s.getState)
 	mux.HandleFunc("POST /api/scan", s.postScan)
 	mux.HandleFunc("POST /api/job/cancel", s.cancelJob)
@@ -262,63 +268,6 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-func (s *Server) currentLive() (LiveSource, string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.live, s.liveName
-}
-
-func (s *Server) liveState(w http.ResponseWriter, r *http.Request) {
-	live, _ := s.currentLive()
-	if live == nil {
-		fail(w, 404, "the monitor is not running")
-		return
-	}
-	writeJSON(w, 200, live.Snapshot())
-}
-
-func (s *Server) liveStart(w http.ResponseWriter, r *http.Request) {
-	var q struct {
-		Profile string `json:"profile"`
-	}
-	if err := readJSON(r, &q); err != nil || !safeProfile.MatchString(q.Profile) || strings.Contains(q.Profile, ",") {
-		fail(w, 400, "bad request")
-		return
-	}
-	if s.cfg.Hooks.StartMonitor == nil {
-		fail(w, 501, "the monitor is not available in this build")
-		return
-	}
-	s.mu.Lock()
-	if s.live != nil {
-		s.mu.Unlock()
-		fail(w, 409, "the monitor is already running")
-		return
-	}
-	s.mu.Unlock()
-	ctx, cancel := context.WithCancel(context.Background())
-	src, err := s.cfg.Hooks.StartMonitor(ctx, q.Profile)
-	if err != nil {
-		cancel()
-		fail(w, 400, err.Error())
-		return
-	}
-	s.mu.Lock()
-	s.live, s.liveCancel, s.liveName = src, cancel, q.Profile
-	s.mu.Unlock()
-	writeJSON(w, 202, map[string]string{"profile": q.Profile})
-}
-
-func (s *Server) liveStop(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	if s.liveCancel != nil {
-		s.liveCancel()
-	}
-	s.live, s.liveCancel, s.liveName = nil, nil, ""
-	s.mu.Unlock()
-	writeJSON(w, 200, map[string]string{"ok": "1"})
 }
 
 func (s *Server) page(body, ctype string) http.HandlerFunc {

@@ -59,6 +59,7 @@ type Snapshot struct {
 	UpdatedAt  time.Time         `json:"updated_at"`
 	Account    string            `json:"account,omitempty"`
 	Profile    string            `json:"profile,omitempty"`
+	Kind       string            `json:"kind,omitempty"` // aws | k8s
 	Demo       bool              `json:"demo,omitempty"`
 	Crit       int               `json:"crit"`
 	Warn       int               `json:"warn"`
