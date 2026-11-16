@@ -75,6 +75,19 @@ type Hooks struct {
 	Scan func(ctx context.Context, r ScanRequest, contextFile string, progress func(string)) (string, error)
 }
 
+// Page is an extra tab supplied by the program that embeds the server. It is
+// served under /x/<Name>/ behind the same guard as everything else (token
+// cookie, Host check, header check on writes) and shown in the app inside a
+// frame, so its HTML may load only same-origin scripts and styles. The handler
+// sees paths with the /x/<Name> prefix removed.
+type Page struct {
+	Name    string // URL segment: letters, digits, '-' and '_'
+	Label   string // nav button text
+	Handler http.Handler
+}
+
+var pageName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
+
 // LiveSource supplies the Problem Monitor screen. A nil source means the
 // monitor is not running.
 type LiveSource interface {
@@ -82,6 +95,7 @@ type LiveSource interface {
 }
 
 type Config struct {
+	Pages   []Page // extra tabs supplied by the embedding program
 	Live    LiveSource
 	Base    string // ~/.infralens
 	Store   *settings.Store
@@ -119,6 +133,13 @@ func New(cfg Config) (*Server, error) {
 	}
 	if cfg.Base == "" || cfg.Store == nil {
 		return nil, errors.New("app: Base and Store are required")
+	}
+	seen := map[string]bool{}
+	for _, p := range cfg.Pages {
+		if !pageName.MatchString(p.Name) || seen[p.Name] || p.Handler == nil || p.Label == "" {
+			return nil, fmt.Errorf("app: bad page %q (name: letters, digits, - and _; unique; label and handler required)", p.Name)
+		}
+		seen[p.Name] = true
 	}
 	srv := &Server{cfg: cfg, host: map[string]bool{}, mons: &monitorSet{}}
 	if cfg.Live != nil {
@@ -210,6 +231,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/audit", s.postAudit)
 	mux.HandleFunc("GET /scan/{account}/{file}/report", s.scanReport)
 	mux.HandleFunc("GET /out/{dir}/{file}", s.outFile)
+	for _, p := range s.cfg.Pages {
+		pre := "/x/" + p.Name
+		mux.Handle(pre+"/", http.StripPrefix(pre, p.Handler))
+	}
 	return s.guard(mux)
 }
 
@@ -260,7 +285,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		// its own policy and may not talk to the network at all.
 		if strings.HasSuffix(r.URL.Path, "/report") || strings.HasPrefix(r.URL.Path, "/out/") || strings.HasPrefix(r.URL.Path, "/ai/") {
 			h.Set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'")
-		} else if r.URL.Path == "/live" {
+		} else if r.URL.Path == "/live" || strings.HasPrefix(r.URL.Path, "/x/") {
 			// the screen is shown on its own and inside the app
 			h.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'")
 		} else {
@@ -413,6 +438,19 @@ func (s *Server) llmView() llmView {
 	return v
 }
 
+type pageView struct {
+	Name  string `json:"name"`
+	Label string `json:"label"`
+}
+
+func (s *Server) pageViews() []pageView {
+	out := []pageView{}
+	for _, p := range s.cfg.Pages {
+		out = append(out, pageView{p.Name, p.Label})
+	}
+	return out
+}
+
 func (s *Server) getState(w http.ResponseWriter, r *http.Request) {
 	var profiles []string
 	if s.cfg.Hooks.Profiles != nil {
@@ -428,7 +466,7 @@ func (s *Server) getState(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	writeJSON(w, 200, map[string]any{
 		"version": s.cfg.Version, "profiles": profiles, "scans": s.listScans(), "job": j,
-		"llm": s.llmView(), "notes": len(s.loadContext().Notes),
+		"llm": s.llmView(), "notes": len(s.loadContext().Notes), "pages": s.pageViews(),
 	})
 }
 

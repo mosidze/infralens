@@ -23,17 +23,37 @@ let chosen = '';
 // ---- tabs -------------------------------------------------------------------
 document.querySelectorAll('#nav button').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));
 function show(tab) {
-  document.querySelector('main').classList.toggle('wide', tab === 'map' || tab === 'problems');
+  document.querySelector('main').classList.toggle('wide', tab === 'map' || tab === 'problems' || tab.startsWith('x-'));
+  if (tab.startsWith('x-')) { const f = $('frame-' + tab); if (f && !f.getAttribute('src')) f.src = f.dataset.src; }
   document.querySelectorAll('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   if (tab === 'map') loadMap();
   if (tab === 'problems' && !$('probframe').getAttribute('src')) $('probframe').src = '/live?embed=1';
   document.querySelectorAll('main > section').forEach((s) => { s.hidden = s.id !== 'tab-' + tab; });
 }
 
+// Extra tabs from the embedding program: each is its own page in a frame.
+function addPages(pages) {
+  for (const p of pages) {
+    const tab = 'x-' + p.name;
+    if ($('tab-' + tab)) continue;
+    const b = el('button', {textContent: p.label});
+    b.dataset.tab = tab;
+    b.addEventListener('click', () => show(tab));
+    $('nav').insertBefore(b, document.querySelector('#nav [data-tab=reports]'));
+    const f = el('iframe', {id: 'frame-' + tab, title: p.label, className: 'xframe'});
+    f.referrerPolicy = 'no-referrer';
+    f.dataset.src = '/x/' + encodeURIComponent(p.name) + '/';
+    const sec = el('section', {id: 'tab-' + tab, className: 'xtab'}, f);
+    sec.hidden = true;
+    document.querySelector('main').append(sec);
+  }
+}
+
 // ---- state ------------------------------------------------------------------
 async function refresh() {
   try { state = Object.assign(state, await api('GET', '/api/state')); } catch (e) { return; }
   $('ver').textContent = 'v' + String(state.version).replace(/^v/, '');
+  addPages(state.pages || []);
   const dl = $('profiles'); dl.textContent = '';
   (state.profiles || []).forEach((p) => dl.append(el('option', {value: p})));
   renderScans(); renderJob(state.job); renderAIScans();
