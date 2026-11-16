@@ -132,10 +132,18 @@ func main() {
 		defer stop()
 		os.Exit(runScanAll(ctx, f))
 	default:
+		if run, ok := extraCommands[os.Args[1]]; ok {
+			os.Exit(run(os.Args[2:]))
+		}
 		printUsage()
 		os.Exit(exitUsage)
 	}
 }
+
+// extraCommands lets a build add subcommands from its own files in this
+// package (registered in init) without editing the switch above. A built-in
+// name always wins.
+var extraCommands = map[string]func(args []string) int{}
 
 func printUsage() {
 	fmt.Fprint(os.Stderr, usage)

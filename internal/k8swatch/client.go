@@ -77,6 +77,18 @@ func Connect(kubeconfig, context string) (*Connection, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ConnectConfig(cfg, context)
+}
+
+// ConnectConfig builds a read-only client from a REST config that the caller
+// assembled itself, for a service that gets its token from a secret store
+// rather than a kubeconfig file. name labels the connection on screen. The
+// caller's config is not modified.
+func ConnectConfig(in *rest.Config, name string) (*Connection, error) {
+	if in == nil || in.Host == "" {
+		return nil, errors.New("no API server address")
+	}
+	cfg := rest.CopyConfig(in)
 	counter := &Counter{}
 	cfg.QPS, cfg.Burst, cfg.Timeout = 20, 40, 30e9
 	prev := cfg.WrapTransport
@@ -90,7 +102,7 @@ func Connect(kubeconfig, context string) (*Connection, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Connection{Client: cs, Context: context, Server: host(cfg.Host), Counter: counter}, nil
+	return &Connection{Client: cs, Context: name, Server: host(cfg.Host), Counter: counter}, nil
 }
 
 func host(s string) string {
