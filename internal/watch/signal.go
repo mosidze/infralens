@@ -66,6 +66,9 @@ type Signal struct {
 	Series    *Series   `json:"series,omitempty"`
 	Changes   []Change  `json:"changes,omitempty"`
 	Note      string    `json:"note,omitempty"` // set when an owner note suppressed it
+	// Link is where to look next: the console, dashboard or page of this problem
+	// (http or https only; the screen ignores anything else).
+	Link string `json:"link,omitempty"`
 	// Chronic marks something that is wrong but not changing: a backlog that has
 	// stood for weeks, an alarm nobody cleared. It is real, but it is not what
 	// is sick right now, so it is kept off the board and listed on request.

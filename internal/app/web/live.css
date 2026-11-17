@@ -31,6 +31,7 @@ main{flex:1;overflow:auto;padding:22px;display:grid;grid-template-columns:repeat
 .sig{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
 .sig:first-of-type{border-top:0;padding-top:0}
 .sig .t{font-weight:600}
+.golink{color:inherit;text-decoration:none}.golink:hover .t,.golink:hover .n{text-decoration:underline}.golink .t::after{content:" ↗";font-weight:400;color:var(--mut)}
 .sig.crit .t{color:var(--crit)}.sig.warn .t{color:var(--warn)}
 .sig ul{margin:4px 0 0;padding-left:18px;color:var(--mut);font-size:13px}
 .thr{color:var(--mut);font-size:12px;margin-top:2px}

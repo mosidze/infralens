@@ -33,6 +33,7 @@ type ChronicItem struct {
 	Title  string    `json:"title"`
 	Since  time.Time `json:"since,omitempty"`
 	Detail string    `json:"detail,omitempty"`
+	Link   string    `json:"link,omitempty"`
 }
 
 // ChronicGroup gathers standing problems of one kind.

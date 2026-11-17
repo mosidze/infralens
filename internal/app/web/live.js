@@ -53,9 +53,22 @@ function spark(series, sev) {
   return box;
 }
 
+// linkTo wraps text in a link that opens in a new tab, or returns the plain
+// element when there is no usable http(s) address.
+function linkTo(node, href) {
+  if (!href || !/^https?:\/\//i.test(href)) return node;
+  const a = el('a', 'golink');
+  a.href = href;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.title = 'Open where this problem lives';
+  a.append(node);
+  return a;
+}
+
 function renderSignal(s) {
   const d = el('div', 'sig ' + s.severity);
-  d.append(el('div', 't', s.title));
+  d.append(linkTo(el('div', 't', s.title), s.link));
   if (s.evidence && s.evidence.length) {
     const ul = el('ul');
     s.evidence.forEach((e) => ul.append(el('li', null, e)));
@@ -116,7 +129,7 @@ function renderChronic(groups) {
     panel.append(el('h3', null, (CHRONIC[g.kind] || g.kind) + ' (' + g.count + ')'));
     g.items.forEach((it) => {
       const row = el('div', 'item');
-      row.append(el('span', 'n', it.name));
+      row.append(linkTo(el('span', 'n', it.name), it.link));
       let d = it.title;
       if (it.since && it.since.indexOf('0001') !== 0) d += ' · for ' + ago(Date.now() - new Date(it.since).getTime());
       row.append(el('span', 'd', d));

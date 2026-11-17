@@ -229,7 +229,7 @@ func (r *Runner) Snapshot() Snapshot {
 				detail = s.Evidence[0]
 			}
 			g.Count++
-			g.Items = append(g.Items, ChronicItem{Name: name, Title: s.Title, Since: s.Since, Detail: detail})
+			g.Items = append(g.Items, ChronicItem{Name: name, Title: s.Title, Since: s.Since, Detail: detail, Link: s.Link})
 			continue
 		}
 		shown = append(shown, s)
