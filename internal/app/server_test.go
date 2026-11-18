@@ -548,3 +548,35 @@ func TestLiveScreenMayBeFramedByTheAppButNothingElseMayBe(t *testing.T) {
 		t.Fatalf("the app itself must not be framed: %q", idx)
 	}
 }
+
+func TestUnwatchRemovesTheTabAndTheSavedEntry(t *testing.T) {
+	base := t.TempDir()
+	_ = os.WriteFile(filepath.Join(base, "monitors.json"), []byte(`[{"kind":"aws","name":"keep"},{"kind":"jira","name":"issues"}]`), 0o600)
+	stopped := make(chan struct{})
+	hooks := Hooks{StartMonitor: func(ctx context.Context, sp MonitorSpec) (LiveSource, error) {
+		if sp.Kind == "jira" {
+			go func() { <-ctx.Done(); close(stopped) }()
+		}
+		return namedLive{}, nil
+	}}
+	s, err := New(Config{Base: base, Store: settings.NewStore(base), Token: "tok", Hooks: hooks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.RestoreMonitors(context.Background())
+	s.Unwatch("")              // never "the only one"
+	s.Unwatch("nothing:there") // unknown: no-op
+	s.Unwatch("jira:issues")
+	if s.mons.get("jira:issues") != nil || s.mons.get("aws:keep") == nil {
+		t.Fatal("wrong monitor removed")
+	}
+	b, _ := os.ReadFile(filepath.Join(base, "monitors.json"))
+	if strings.Contains(string(b), "jira") || !strings.Contains(string(b), "keep") {
+		t.Fatalf("saved list = %s", b)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the monitor's context was not cancelled")
+	}
+}

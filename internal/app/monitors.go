@@ -244,6 +244,21 @@ func (s *Server) k8sContexts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"contexts": ctxs})
 }
 
+// Unwatch stops a monitor and removes its tab, and the saved list forgets it,
+// so it does not come back on the next start. It is for the embedding program
+// when a source moves off the Problem Monitor (an unknown id is a no-op).
+func (s *Server) Unwatch(id string) {
+	if id == "" {
+		return
+	}
+	if m := s.mons.remove(id); m != nil {
+		if m.cancel != nil {
+			m.cancel()
+		}
+		s.saveMonitors()
+	}
+}
+
 // Watch starts a monitor unless one with the same identity already exists.
 func (s *Server) Watch(ctx context.Context, sp MonitorSpec) error {
 	if old := s.mons.get(sp.ID()); old != nil {
